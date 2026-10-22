@@ -1,6 +1,4 @@
-# ==============================================================================
-#      FREE FIRE FULL BOT ENGINE & ADVANCED DASHBOARD (OB55 READY)
-# ==============================================================================
+# ==================== STANDARD IMPORTS ====================
 import sys
 import asyncio
 import httpx
@@ -15,13 +13,6 @@ import itertools
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
-# Web Server Imports
-import uvicorn
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
 if sys.platform == "win32":
     try:
         if hasattr(sys.stdout, 'reconfigure'):
@@ -31,7 +22,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# ==================== ORIGINAL EXTERNAL MODULE IMPORTS ====================
+# ==================== ORIGINAL IMPORTS ====================
 from google_play_scraper import app as play_scraper
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -39,25 +30,25 @@ from protobuf_decoder.protobuf_decoder import Parser
 from message_ids import MESSAGE_ID_TO_NAME
 import thunderFF_pb2
 
-# ==================== CONFIGURATION & ENVIRONMENT ====================
-WEB_HOST = "0.0.0.0"
-WEB_PORT = int(os.environ.get("PORT", 20335))
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "ADMIN_SECRET_KEY_84FF")
+# ==================== WEB DASHBOARD ====================
+from dashboard_server import bot_state, start_web_dashboard
 
+# ==================== CONFIGURATION ====================
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 20335
 ACCOUNTS_FILE = "accounts.json"
 TOKEN_CACHE_FILE = "token_cache.json"
-DEVICES_FILE = "devices.json"
-USERS_FILE = "users.json"
+DEVICES_FILE = "devices.json"  # 🔥 NEW: Persistent device storage
 TOKEN_CACHE_TTL = 1200
 
-# Match Control
+# 🔥 Match control
 START_MATCH_INTERVAL = 3.0
 NEW_MATCH_DELAY = 3.0   
 MAX_MATCH_DURATION = 700
 MATCH_IDLE_TIMEOUT = 8.0
-PRIORITY_REGIONS = ["BD", "IND", "SG", "TH", "PH", "VN", "MY", "ID", "HK", "TW"]
+PRIORITY_REGIONS = ["BD","IND", "SG", "TH", "PH", "VN", "MY", "ID", "HK", "TW"]
 
-# Invalidation Thresholds
+# 🔥 Cache invalidation thresholds
 MAX_CONSECUTIVE_PARSE_FAILURES = 5.0     
 NON_MATCH_RECONNECT_DELAY = 1.0       
 
@@ -65,77 +56,13 @@ FALLBACK_UID = ""
 FALLBACK_PASSWORD = ""
 
 
-# ==================== GLOBAL STATE & DASHBOARD TRACKER ====================
-class BotDashboardState:
-    def __init__(self):
-        self.accounts: Dict[str, Dict[str, Any]] = {}
-        self.account_credentials: Dict[str, Dict[str, Any]] = {}
-        self.account_workers: Dict[str, asyncio.Task] = {}
-        self.refresh_callbacks: Dict[str, Any] = {}
-        self.logs: List[Dict[str, Any]] = []
-
-    def log(self, message: str, level: str = "info"):
-        entry = {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "message": message,
-            "level": level
-        }
-        self.logs.append(entry)
-        if len(self.logs) > 200:
-            self.logs.pop(0)
-
-    def register_account(self, uid: str, nickname: str, region: str, level: int, exp: int, likes: int):
-        uid_str = str(uid)
-        if uid_str not in self.accounts:
-            self.accounts[uid_str] = {
-                "uid": uid_str,
-                "nickname": nickname,
-                "region": region,
-                "level": level,
-                "initial_exp": exp,
-                "current_exp": exp,
-                "gained_exp": 0,
-                "likes": likes,
-                "matches_played": 0,
-                "status": "OFFLINE",
-                "active_matches": 0,
-                "last_match_time": None,
-                "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-        else:
-            self.accounts[uid_str]["nickname"] = nickname
-            self.accounts[uid_str]["region"] = region
-            self.accounts[uid_str]["level"] = level
-            self.accounts[uid_str]["current_exp"] = exp
-            self.accounts[uid_str]["likes"] = likes
-
-    def update_status(self, uid: str, status_str: str, active_matches: int = 0):
-        uid_str = str(uid)
-        if uid_str in self.accounts:
-            self.accounts[uid_str]["status"] = status_str
-            self.accounts[uid_str]["active_matches"] = active_matches
-
-    def increment_match(self, uid: str):
-        uid_str = str(uid)
-        if uid_str in self.accounts:
-            self.accounts[uid_str]["matches_played"] += 1
-            self.accounts[uid_str]["last_match_time"] = datetime.now().strftime("%H:%M:%S")
-
-    def update_exp(self, uid: str, current_exp: int, level: int):
-        uid_str = str(uid)
-        if uid_str in self.accounts:
-            acc = self.accounts[uid_str]
-            if acc["initial_exp"] == 0:
-                acc["initial_exp"] = current_exp
-            acc["gained_exp"] = max(0, current_exp - acc["initial_exp"])
-            acc["current_exp"] = current_exp
-            acc["level"] = level
-
-bot_state = BotDashboardState()
-
-
 # ==================== ULTRA SAFE PERSISTENT DEVICE RANDOMIZER ====================
 def get_device_for_account(account_identifier: str) -> dict:
+    """
+    Ensures 1 ID = 1 Specific Device.
+    It loads saved devices from devices.json. If the account isn't found, 
+    it generates a new profile and saves it permanently for this ID.
+    """
     devices = {}
     if os.path.exists(DEVICES_FILE):
         try:
@@ -145,9 +72,11 @@ def get_device_for_account(account_identifier: str) -> dict:
             pass
             
     acc_key = str(account_identifier)
+    
     if acc_key in devices:
         return devices[acc_key]
         
+    # Generate new device profile for this account
     device_list = [
         ("Samsung", "SM-G998B", "Adreno (TM) 660", "Android OS 12 / API-31"),
         ("Xiaomi", "2201122G", "Adreno (TM) 730", "Android OS 13 / API-33"),
@@ -174,6 +103,7 @@ def get_device_for_account(account_identifier: str) -> dict:
     }
     
     devices[acc_key] = new_device
+    
     try:
         with open(DEVICES_FILE, "w", encoding="utf-8") as f:
             json.dump(devices, f, indent=4)
@@ -187,7 +117,7 @@ def get_device_for_account(account_identifier: str) -> dict:
 CLOUDFLARE_PRIMARY_DNS = "1.1.1.1"
 CLOUDFLARE_SECONDARY_DNS = "1.0.0.1"
 _DNS_CACHE: Dict[str, Tuple[str, float]] = {}
-_DNS_CACHE_TTL = 300.0
+_DNS_CACHE_TTL = 300.0  # 5 minutes DNS cache
 
 async def resolve_host_cloudflare(hostname: str) -> str:
     if not hostname:
@@ -221,14 +151,16 @@ async def resolve_host_cloudflare(hostname: str) -> str:
                 if ancount > 0:
                     offset = 12 + len(qname) + 4
                     for _ in range(ancount):
-                        if offset >= len(resp): break
+                        if offset >= len(resp):
+                            break
                         if (resp[offset] & 0xC0) == 0xC0:
                             offset += 2
                         else:
                             while offset < len(resp) and resp[offset] != 0:
                                 offset += 1 + resp[offset]
                             offset += 1
-                        if offset + 10 > len(resp): break
+                        if offset + 10 > len(resp):
+                            break
                         rtype, rclass, ttl, rdlen = struct.unpack(">HHIH", resp[offset:offset+10])
                         offset += 10
                         if rtype == 1 and rdlen == 4 and offset + 4 <= len(resp):
@@ -238,8 +170,10 @@ async def resolve_host_cloudflare(hostname: str) -> str:
             pass
         finally:
             if s:
-                try: s.close()
-                except Exception: pass
+                try:
+                    s.close()
+                except Exception:
+                    pass
         return None
 
     loop = asyncio.get_running_loop()
@@ -249,11 +183,13 @@ async def resolve_host_cloudflare(hostname: str) -> str:
     if not ip:
         try:
             ip_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
-            if ip_info: ip = ip_info[0][4][0]
+            if ip_info:
+                ip = ip_info[0][4][0]
         except Exception:
             ip = hostname
 
-    if ip: _DNS_CACHE[hostname] = (ip, now + _DNS_CACHE_TTL)
+    if ip:
+        _DNS_CACHE[hostname] = (ip, now + _DNS_CACHE_TTL)
     return ip or hostname
 
 
@@ -266,18 +202,21 @@ def optimize_tcp_socket(sock: socket.socket):
     except Exception:
         pass
 
+
 def optimize_udp_socket(sock: socket.socket):
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 131072)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 131072)
         if hasattr(socket, 'SIO_UDP_CONNRESET') and os.name == 'nt':
-            try: sock.ioctl(socket.SIO_UDP_CONNRESET, False)
-            except Exception: pass
+            try:
+                sock.ioctl(socket.SIO_UDP_CONNRESET, False)
+            except Exception:
+                pass
     except Exception:
         pass
 
 
-# ==================== NETWORK & CRYPTO ENGINE ====================
+# ==================== NETWORK & CRYPTO ====================
 client = httpx.AsyncClient(
     verify=False,
     timeout=10.0,
@@ -323,6 +262,28 @@ _ROUNDS = 16
 _FIELD_SIZES = {0: 1, 1: 2, 2: 2, 3: 1, 4: 2}
 _FIELD_NAMES = {0: "sendOption", 1: "cmd", 2: "orderId", 3: "flags", 4: "length"}
 
+sai_tail_dul = bytes.fromhex(
+    "0101030101045452000103000100000410312e3133302e3232"
+    "1432303139313231303430ca0163736f7665727365612e737472"
+    "6f6e67686f6c642e66726565666972656d6f62696c652e636f6d"
+    "3b302e302e302e303b33342e3132362e37362e34353b33342e38"
+    "372e3137372e31343b33342e38372e3137302e3233303b33352e"
+    "3138352e3138332e353700000000000001000000000000000000"
+    "0000000100000000000100000000000100b8eeec91c5d7ffde110200"
+)
+
+headers = {
+    'User-Agent': 'UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)',
+    'Connection': 'Keep-Alive',
+    'Accept-Encoding': 'gzip',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Expect': '100-continue',
+    'X-Unity-Version': '2018.4.12f1',
+    'X-GA-SV': '1789535859',
+    'X-GA': 'v1 1',
+    'ReleaseVersion': 'OB55'
+}
+
 class Colors:
     HEADER = '\033[95m'
     GREEN = '\033[92m'
@@ -334,27 +295,45 @@ class Colors:
     ENDC = '\033[0m'
 
 def print_colored(text, color=Colors.WHITE):
-    try: print(f"{color}{text}{Colors.ENDC}")
-    except Exception: pass
+    try:
+        print(f"{color}{text}{Colors.ENDC}")
+    except Exception:
+        try:
+            print(f"{color}{text.encode('ascii', errors='replace').decode('ascii')}{Colors.ENDC}")
+        except Exception:
+            pass
 
 def print_success(text):
     print_colored(f"[+] {text}", Colors.GREEN)
-    bot_state.log(text, "success")
+    try:
+        bot_state.log(text, "success")
+    except Exception:
+        pass
 
 def print_error(text):
     print_colored(f"[-] {text}", Colors.FAIL)
-    bot_state.log(text, "error")
+    try:
+        bot_state.log(text, "error")
+    except Exception:
+        pass
 
 def print_warning(text):
     print_colored(f"[!] {text}", Colors.WARNING)
-    bot_state.log(text, "warning")
+    try:
+        bot_state.log(text, "warning")
+    except Exception:
+        pass
 
 def print_info(text):
     print_colored(f"[i] {text}", Colors.CYAN)
-    bot_state.log(text, "info")
+    try:
+        bot_state.log(text, "info")
+    except Exception:
+        pass
 
 def get_proto_field(d, key, default=None):
-    if not d or not isinstance(d, dict): return default
+    if not d or not isinstance(d, dict):
+        return default
     if key in d:
         val = d[key].get('data')
         return val if val is not None else default
@@ -388,22 +367,26 @@ async def _get_total_match_count() -> int:
         return sum(_match_counters.values())
 
 
-# ==================== TOKEN CACHE SYSTEM ====================
+# ==================== TOKEN CACHE ====================
 _token_cache_memo: Dict[str, Any] = {}
 _token_cache_memo_time: float = 0.0
 _TOKEN_CACHE_MEMO_TTL = 5.0
 
 def _json_serializer(obj):
-    if isinstance(obj, (bytes, bytearray)): return {"__bytes_hex__": bytes(obj).hex()}
+    if isinstance(obj, (bytes, bytearray)):
+        return {"__bytes_hex__": bytes(obj).hex()}
     raise TypeError(f"Type {type(obj)} not serializable")
 
 def _json_deserializer(obj):
     if isinstance(obj, dict):
         if "__bytes_hex__" in obj and len(obj) == 1:
-            try: return bytes.fromhex(obj["__bytes_hex__"])
-            except Exception: return b""
+            try:
+                return bytes.fromhex(obj["__bytes_hex__"])
+            except Exception:
+                return b""
         return {k: _json_deserializer(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [_json_deserializer(x) for x in obj]
+    if isinstance(obj, list):
+        return [_json_deserializer(x) for x in obj]
     return obj
 
 def _load_token_cache() -> Dict[str, Any]:
@@ -411,19 +394,27 @@ def _load_token_cache() -> Dict[str, Any]:
     now = time.time()
     if _token_cache_memo and (now - _token_cache_memo_time) < _TOKEN_CACHE_MEMO_TTL:
         return _token_cache_memo
-    if not os.path.exists(TOKEN_CACHE_FILE): return {}
+
+    if not os.path.exists(TOKEN_CACHE_FILE):
+        return {}
     try:
-        with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f: content = f.read().strip()
-        if not content: return {}
+        with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if not content:
+            return {}
         data = json.loads(content)
+        if not isinstance(data, dict):
+            raise ValueError("Cache root must be dict")
         parsed = _json_deserializer(data)
         _token_cache_memo = parsed
         _token_cache_memo_time = now
         return parsed
     except Exception as e:
         print_error(f"Token cache corrupt → deleting: {e}")
-        try: os.remove(TOKEN_CACHE_FILE)
-        except Exception: pass
+        try:
+            os.remove(TOKEN_CACHE_FILE)
+        except Exception:
+            pass
         return {}
 
 def _save_token_cache(cache: Dict[str, Any]):
@@ -441,13 +432,16 @@ def _save_token_cache(cache: Dict[str, Any]):
 def cache_get(uid: str) -> Optional[Dict]:
     cache = _load_token_cache()
     entry = cache.get(str(uid))
-    if not entry: return None
+    if not entry:
+        return None
     if time.time() - entry.get("cached_at", 0) > TOKEN_CACHE_TTL:
         print_info(f"[CACHE] UID {uid} expired. Re-login needed.")
         cache_invalidate(uid)
         return None
-    if str(entry.get("account_id", "")).isdigit(): entry["account_id"] = int(entry["account_id"])
+    if str(entry.get("account_id", "")).isdigit():
+        entry["account_id"] = int(entry["account_id"])
     if not isinstance(entry.get("login_payload_data"), (bytes, bytearray)):
+        print_warning(f"[CACHE] UID {uid} missing payload → invalidating")
         cache_invalidate(uid)
         return None
     return entry
@@ -458,15 +452,18 @@ def cache_set(uid: str, account_data: Dict):
     entry["cached_at"] = time.time()
     cache[str(uid)] = entry
     _save_token_cache(cache)
+    print_success(f"[CACHE] Saved credentials for UID {uid}")
 
 def cache_invalidate(uid: str):
     cache = _load_token_cache()
     if str(uid) in cache:
         del cache[str(uid)]
         _save_token_cache(cache)
+        print_warning(f"[CACHE] Invalidated: {uid}")
 
 
-# ==================== ENCRYPTION & PROTOBUF FUNCTIONS ====================
+# ==================== ENCRYPTION & PROTOBUF ====================
+
 async def aes_encrypt(payload, key, iv):
     cipher = AES.new(key, AES.MODE_CBC, iv)
     return cipher.encrypt(pad(payload, AES.block_size))
@@ -474,7 +471,8 @@ async def aes_encrypt(payload, key, iv):
 async def get_playstore_version():
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
-        None, lambda: play_scraper('com.dts.freefireth', lang='hi', country='id')
+        None,
+        lambda: play_scraper('com.dts.freefireth', lang='hi', country='id')
     )
     return result.get("version")
 
@@ -517,7 +515,7 @@ async def get_access_token(uid, password):
         "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3",
         "client_id": "100067"
     }
-    for _ in range(5):
+    for attempt in range(5):
         try:
             response = await client.post(url, headers=hdrs, data=data)
             if response.status_code == 200:
@@ -539,7 +537,11 @@ async def parse_results(parsed_results):
     result_dict = {}
     for result in parsed_results:
         field_data = {"wire_type": result.wire_type}
-        if result.wire_type in ["varint", "string", "bytes"]:
+        if result.wire_type == "varint":
+            field_data["data"] = result.data
+        elif result.wire_type == "string":
+            field_data["data"] = result.data
+        elif result.wire_type == "bytes":
             field_data["data"] = result.data
         elif result.wire_type == "length_delimited":
             field_data["data"] = await parse_results(result.data.results)
@@ -560,18 +562,19 @@ async def build_majorlogin_payload(open_id, access_token, platform, client_versi
         proto.client_version = client_version
         proto.client_version_code = "2019121229"
         
-        # Inject persistent device details
-        proto.system_software = device_info.get("system_software", "Android OS 12 / API-31")
+        # --- INJECTING PERSISTENT DYNAMIC DEVICE DATA ---
+        proto.system_software = device_info.get("system_software", "Android OS 12 / API-31 (SP1A.210812.016.C2/user.dxu.20260701.180839)")
         proto.system_hardware = device_info.get("brand", "Handheld")
         proto.device_type = device_info.get("model", "Handheld")
         proto.screen_width = int(device_info.get("screen_width", 1600))
         proto.screen_height = int(device_info.get("screen_height", 900))
         proto.screen_dpi = str(device_info.get("screen_dpi", "300"))
-        proto.processor_details = device_info.get("processor_details", "ARM64 FP ASIMD AES")
+        proto.processor_details = device_info.get("processor_details", "x86-64 SSE3 SSE4.1 SSE4.2 AVX | 2400 | 4")
         proto.memory = int(device_info.get("memory", 5951))
         proto.gpu_renderer = device_info.get("gpu_renderer", "Adreno (TM) 640")
-        proto.unique_device_id = device_info.get("unique_device_id", f"Google|{uuid.uuid4()}")
+        proto.unique_device_id = device_info.get("unique_device_id", "Google|725030d8-6585-4f55-bcca-a6df7e59935b")
         proto.client_ip = device_info.get("client_ip", "103.145.112.210")
+        # ------------------------------------------------
         
         proto.telecom_operator = "Citycell"
         proto.network_operator_a = "Citycell"
@@ -606,8 +609,8 @@ async def build_majorlogin_payload(open_id, access_token, platform, client_versi
         proto.external_sdcard_total_storage = 34308
         proto.external_sdcard_avail_storage = 32224
         
-        proto.library_path = "/data/app/com.dts.freefireth/lib/arm64"
-        proto.library_token = "b8e0cd5e295eee42f5860d3c86e483dd"
+        proto.library_path = "/data/app/~~UKDdGuy32C5yOa0KZe_ROA==/com.dts.freefireth-UAKF1gjDbXSGfpA07JDTKQ==/lib/arm64"
+        proto.library_token = "b8e0cd5e295eee42f5860d3c86e483dd|/data/app/~~UKDdGuy32C5yOa0KZe_ROA==/com.dts.freefireth-UAKF1gjDbXSGfpA07JDTKQ==/base.apk"
         proto.client_using_version = "7428b253defc164018c604a1ebbfebdf"
         proto.supported_astc_bitset = 4095
         proto.analytics_detail = b"FwQVTgUPX1UaUllDDwcWCRBpWAUOUgsvA1snWlBaO1kFYg=="
@@ -629,29 +632,40 @@ async def send_majorlogin(data, release_version, server_url):
         req_headers = headers.copy()
         req_headers["ReleaseVersion"] = release_version
         response = await client.post(url, headers=req_headers, data=data)
-        if response.status_code != 200: return None
+        if response.status_code != 200:
+            return None
         response_content = response.content
-        if len(response_content) < 40: return None
+        if len(response_content) < 40:
+            return None
 
+        # 1. Direct parse
         res_proto = thunderFF_pb2.MajorLoginRes()
         try:
             res_proto.ParseFromString(response_content)
-            if res_proto.region and res_proto.token: return res_proto
-        except Exception: pass
+            if res_proto.region and res_proto.token:
+                return res_proto
+        except Exception:
+            pass
 
+        # 2. OB55 64-byte header offset check
         if len(response_content) > 64:
             try:
                 res_proto = thunderFF_pb2.MajorLoginRes()
                 res_proto.ParseFromString(response_content[64:])
-                if res_proto.region and res_proto.token: return res_proto
-            except Exception: pass
+                if res_proto.region and res_proto.token:
+                    return res_proto
+            except Exception:
+                pass
 
+        # 3. Dynamic offset search for OB55 compatibility
         for offset in range(min(128, len(response_content))):
             try:
                 candidate = thunderFF_pb2.MajorLoginRes()
                 candidate.ParseFromString(response_content[offset:])
-                if candidate.region and candidate.token: return candidate
-            except Exception: pass
+                if candidate.region and candidate.token:
+                    return candidate
+            except Exception:
+                pass
 
         res_proto = thunderFF_pb2.MajorLoginRes()
         res_proto.ParseFromString(response_content)
@@ -667,7 +681,8 @@ async def send_getlogin(data, base_url, token, release_version):
         req_headers['Authorization'] = f"Bearer {token}"
         req_headers['Host'] = "clientbp.ppmainecoonghj.com"
         response = await client.post(url, headers=req_headers, data=data)
-        if response.status_code != 200: return None
+        if response.status_code != 200:
+            return None
         response_content = response.content
 
         res_proto = thunderFF_pb2.GetLoginDataRes()
@@ -676,7 +691,8 @@ async def send_getlogin(data, base_url, token, release_version):
             res_proto.ParseFromString(response_content)
             if res_proto.functional_addrs or res_proto.informational_addrs:
                 parsed_successfully = True
-        except Exception: pass
+        except Exception:
+            pass
 
         if not parsed_successfully:
             for offset in range(min(128, len(response_content))):
@@ -686,13 +702,15 @@ async def send_getlogin(data, base_url, token, release_version):
                     if candidate.functional_addrs or candidate.informational_addrs:
                         res_proto = candidate
                         break
-                except Exception: pass
+                except Exception:
+                    pass
 
         dict_res = {}
         try:
             parsed = Parser().parse(response_content.hex())
             dict_res = await parse_results(parsed)
-        except Exception: pass
+        except Exception:
+            pass
 
         return res_proto, dict_res
     except Exception:
@@ -708,17 +726,19 @@ async def build_tcp_startup_packet(account_id, token, server_time, key, iv, regi
     if typ == 'OnLine':
         prefix = '7119' if reg == 'BD' else ('7114' if reg == 'IND' else '7115')
         return f"{prefix}{uid_hex}{timestamp_hex}00000000{encrypted_packet_length}{encrypted_packet}"
-    else:
+    else:  # ChaT / Informational
         prefix = '9219' if reg == 'BD' else ('9214' if reg == 'IND' else '9215')
         return f"{prefix}{uid_hex}{timestamp_hex}{encrypted_packet_length}{encrypted_packet}"
 
 async def send_keep_alive(region="BD"):
+    """Send 2-byte keep-alive pulse to maintain connection in OB55"""
     try:
         reg = str(region).upper() if region else "BD"
         ka_hex = "0219" if reg == "BD" else ("0214" if reg == "IND" else "0215")
         return bytes.fromhex(ka_hex)
     except Exception:
         return bytes.fromhex("0219")
+
 
 async def start_game_lone_wolf(region, client_version, writer, key, iv):
     packet = bytes.fromhex("080112800a0a010b102b3a110a044944433110aa011a064555524f50453a100a044944433210311a064555524f504540014a0801090a0b1219202758016291090a8001303838463832424630324139363736373032303130313030303030303030303030303136303030313030313530303032323246393745454530463030303030303436373632353134303030303030303030303030303030303030303030303030303030303030303030303030303066663030303030303030636163666131366410241afb02735d5e571400024a775d45414d1a041b1c001f11010449715f4243481a001e1d071c1703004b1a4066785c524570735c51486775421b5c5a4c07504042685a63610816054e19025e75196001477c015165406370195f5547404e4550640103020f1304064863754268676c755f65576e40467e5f0a417a4701026d675d6e73670b1108495a4c6a0b78470b740065645e525a057258425f584a447d4e6759440c11044e7c596d7f4b625f7d04055a47505c4e1d6b5b4107447d7201057d7f0f14084e430457674f7e517d72015172415d027473577c4d615f79535256780911030f4d5e027a797f614165067806505d53777750475e75064257076500460817014e741e7e5078487e7a7c465e7669767153497064605a7376677773550d160148037e18675966787f4c42607a645f577e7b441b460776026b18685d0b110205490060020f70676175654674706671797f41067346677c4e06585e780f15074c57047b40517075415f6364027259674b5b0166407f7340600407770a22047a5d5c52300b3a0a167305067162727516134208312e3133302e3232480350015ae90403626253513635686e556f4e36416456324b796f566c636f477776484f624e56526c4d727073504b4f43654177616848494176795556497273743752737149734a7a786b3247525268377a2f637664626d504f6a73552f79626d38547a4c69586d2f474351696d494b53486833447955726f39515152756c34545350626d6d624b7949565937545671577059455372323646572f59624578507338514f706d317372785455736c30796a434144444d4f34616a654b615753366361496c554b4963797a494e396d52516f715277687939797257476d337a644345337a6a61436f492f5a585233656f65365a42647a64677654636b6b665733356e4d4c6a6a565072564b6433523172756174394e50514150724a5546627859696c4c5a3859707336654d5447666b6649793574666a526c314d4648706b51774c6373374439656378566c41636f374e664f6d2b30654756466c4434744478706771385533595973587645384842502f70666c767a737138316a32524f4d7857437556445442492f684735625462773166456e4249725162762b636144775147696f74554e316d4c4b77734379456f4766706746614251457645672b736a764c4c78704743334c304a5344532f74526169504354553344374e6249306547516651622f5a466f4c36455630775a324d6f583932414c572f5049752f56634663584e70596b356f7966326151416a536971486a2f363276354843644f525551303578754e6171795251625653704654303137655237675255636b4966366c6f447476342b514e4a4670766d74757077707774396a5a5974437a4b56743657726d6e36785837706658456251555434684f3758a201050803108703a201050804108103a20105080510c001a20105081d10cc01a2010408161078a20105080e10af01a201020815")
@@ -753,24 +773,34 @@ async def uleb_encode(n):
     while True:
         b = n & 0x7F
         n >>= 7
-        if n: b |= 0x80
+        if n:
+            b |= 0x80
         out.append(b)
-        if not n: break
+        if not n:
+            break
     return bytes(out)
 
 async def tea_enc(v0, v1, k0, k1, k2, k3):
     s = 0
     for _ in range(_ROUNDS):
         s = (s + _DELTA) & 0xFFFFFFFF
-        v0 = (v0 + (((((v1 << 4) & 0xFFFFFFFF) + k0) & 0xFFFFFFFF ^ ((v1 + s) & 0xFFFFFFFF) ^ (((v1 >> 5) + k1) & 0xFFFFFFFF)))) & 0xFFFFFFFF
-        v1 = (v1 + (((((v0 << 4) & 0xFFFFFFFF) + k2) & 0xFFFFFFFF ^ ((v0 + s) & 0xFFFFFFFF) ^ (((v0 >> 5) + k3) & 0xFFFFFFFF)))) & 0xFFFFFFFF
+        v0 = (v0 + (((((v1 << 4) & 0xFFFFFFFF) + k0) & 0xFFFFFFFF ^
+                      ((v1 + s) & 0xFFFFFFFF) ^
+                      (((v1 >> 5) + k1) & 0xFFFFFFFF)))) & 0xFFFFFFFF
+        v1 = (v1 + (((((v0 << 4) & 0xFFFFFFFF) + k2) & 0xFFFFFFFF ^
+                      ((v0 + s) & 0xFFFFFFFF) ^
+                      (((v0 >> 5) + k3) & 0xFFFFFFFF)))) & 0xFFFFFFFF
     return v0, v1
 
 async def tea_dec(v0, v1, k0, k1, k2, k3):
     s = (_DELTA * _ROUNDS) & 0xFFFFFFFF
     for _ in range(_ROUNDS):
-        v1 = (v1 - (((((v0 << 4) & 0xFFFFFFFF) + k2) & 0xFFFFFFFF ^ ((v0 + s) & 0xFFFFFFFF) ^ (((v0 >> 5) + k3) & 0xFFFFFFFF)))) & 0xFFFFFFFF
-        v0 = (v0 - (((((v1 << 4) & 0xFFFFFFFF) + k0) & 0xFFFFFFFF ^ ((v1 + s) & 0xFFFFFFFF) ^ (((v1 >> 5) + k1) & 0xFFFFFFFF)))) & 0xFFFFFFFF
+        v1 = (v1 - (((((v0 << 4) & 0xFFFFFFFF) + k2) & 0xFFFFFFFF ^
+                      ((v0 + s) & 0xFFFFFFFF) ^
+                      (((v0 >> 5) + k3) & 0xFFFFFFFF)))) & 0xFFFFFFFF
+        v0 = (v0 - (((((v1 << 4) & 0xFFFFFFFF) + k0) & 0xFFFFFFFF ^
+                      ((v1 + s) & 0xFFFFFFFF) ^
+                      (((v1 >> 5) + k1) & 0xFFFFFFFF)))) & 0xFFFFFFFF
         s = (s - _DELTA) & 0xFFFFFFFF
     return v0, v1
 
@@ -781,12 +811,18 @@ async def tea_cbc_encrypt(padded, key_bytes):
     prev_intermediate = bytearray(8)
     for i in range(0, len(padded), 8):
         xored = bytearray(8)
-        for j in range(8): xored[j] = padded[i + j] ^ prev_cipher[j]
-        e0, e1 = await tea_enc(struct.unpack_from("<I", xored, 0)[0], struct.unpack_from("<I", xored, 4)[0], k0, k1, k2, k3)
+        for j in range(8):
+            xored[j] = padded[i + j] ^ prev_cipher[j]
+        e0, e1 = await tea_enc(
+            struct.unpack_from("<I", xored, 0)[0],
+            struct.unpack_from("<I", xored, 4)[0],
+            k0, k1, k2, k3,
+        )
         enc = bytearray(8)
         struct.pack_into("<I", enc, 0, e0)
         struct.pack_into("<I", enc, 4, e1)
-        for j in range(8): out[i + j] = enc[j] ^ prev_intermediate[j]
+        for j in range(8):
+            out[i + j] = enc[j] ^ prev_intermediate[j]
         prev_cipher[:] = out[i:i + 8]
         prev_intermediate[:] = xored
     return bytes(out)
@@ -829,11 +865,15 @@ async def build_match_startup_packets(token, udp_key, match_code, account_id, bl
     udp_key = bytes.fromhex(udp_key)
     match_code = [int(ch) for ch in str(match_code).strip()]
     
+    # OB55 splits JWT match token at 660 bytes
     thunder_jwt = token[:660] if len(token) > 660 else token
     sharma_jwt = token[660:] if len(token) > 660 else ""
     encoded_thunder_jwt = thunder_jwt.encode() if isinstance(thunder_jwt, str) else thunder_jwt
     encoded_sharma_jwt = sharma_jwt.encode() if isinstance(sharma_jwt, str) else sharma_jwt
     
+    garena420 = await has_ssan_zig(len(encoded_thunder_jwt)) + encoded_thunder_jwt
+    
+    # OB55 Sharma payload structure matching Wireshark capture
     reg = str(region).upper() if region else "BD"
     csoversea_block = bytes.fromhex(
         "ca0163736f7665727365612e7374726f6e67686f6c642e66726565666972656d6f62696c652e636f6d"
@@ -852,7 +892,9 @@ async def build_match_startup_packets(token, udp_key, match_code, account_id, bl
     mid += await has_ssan_zig(len(clean_ip)) + clean_ip.encode()
     
     clean_acc_tok = access_token.strip() if access_token else ""
-    if clean_acc_tok: mid += await has_ssan_zig(len(clean_acc_tok)) + clean_acc_tok.encode()
+    if clean_acc_tok:
+        mid += await has_ssan_zig(len(clean_acc_tok)) + clean_acc_tok.encode()
+        
     mid += await has_ssan_zig(len(encoded_sharma_jwt)) + encoded_sharma_jwt
     
     tg_garena420 = (
@@ -861,10 +903,11 @@ async def build_match_startup_packets(token, udp_key, match_code, account_id, bl
         await uleb_encode(1) +
         await uleb_encode(43) +
         await uleb_encode(int(block_val)) +
-        await uleb_encode(11) + mid
+        await uleb_encode(11) +
+        mid
     )
     
-    process = await sv_frame(0x5E, match_code, 2, 447, 0, 1, tg_garena420, udp_key)
+    process = await sv_frame(0x5E, match_code, 2, 447, 0, 1, garena420, udp_key)
     loading = await sv_frame(0x5A, match_code, 2, 448, 1, 1, tg_garena420, udp_key)
     return process.hex(), loading.hex()
 
@@ -873,7 +916,9 @@ async def produce_xor_key(secret_key):
     return k, ((k << 8) | k) & 0xFFFF
 
 async def parse_layout(layout):
-    return [int(ch) for ch in str(layout).strip()] if isinstance(layout, str) else list(layout)
+    if isinstance(layout, str):
+        return [int(ch) for ch in layout.strip()]
+    return list(layout)
 
 async def tea_cbc_decrypt(body, key_bytes):
     k0, k1, k2, k3 = (struct.unpack_from("<I", key_bytes, o)[0] for o in (0, 4, 8, 12))
@@ -883,18 +928,25 @@ async def tea_cbc_decrypt(body, key_bytes):
     xored = bytearray(8)
     dec = bytearray(8)
     for i in range(0, len(body), 8):
-        for j in range(8): xored[j] = body[i + j] ^ prev_intermediate[j]
-        d0, d1 = await tea_dec(struct.unpack_from("<I", xored, 0)[0], struct.unpack_from("<I", xored, 4)[0], k0, k1, k2, k3)
+        for j in range(8):
+            xored[j] = body[i + j] ^ prev_intermediate[j]
+        d0, d1 = await tea_dec(
+            struct.unpack_from("<I", xored, 0)[0],
+            struct.unpack_from("<I", xored, 4)[0],
+            k0, k1, k2, k3
+        )
         struct.pack_into("<I", dec, 0, d0)
         struct.pack_into("<I", dec, 4, d1)
-        for j in range(8): out[i + j] = dec[j] ^ prev_cipher[j]
+        for j in range(8):
+            out[i + j] = dec[j] ^ prev_cipher[j]
         prev_cipher[:] = body[i:i + 8]
         prev_intermediate[:] = dec
     return bytes(out)
 
 async def build_hello_packet(text, key, layout):
     data = text.encode("utf-8")
-    if len(data) > 25: raise ValueError("Text is too long")
+    if len(data) > 25:
+        raise ValueError(f"Text is too long ({len(data)} bytes)")
     content = b"\x10\x00\x00\x00" + data + b"\x00" * (29 - 4 - len(data))
     k, v80 = await produce_xor_key(key)
     layout = await parse_layout(layout)
@@ -908,12 +960,18 @@ async def build_hello_packet(text, key, layout):
 async def classify(frame):
     cmd = frame["cmd"]
     msg_name = MESSAGE_ID_TO_NAME.get(cmd, f"UNKNOWN_{cmd}")
-    if msg_name == "UDP_HELLO": return "HELLO"
-    if msg_name == "UDP_ACK": return "ACK"
-    if msg_name == "UDP_PING": return "PING"
-    if msg_name == "RUDP_JOIN_MATCH": return "JOIN_MATCH"
-    if msg_name.startswith("RUDP_"): return msg_name
-    if msg_name.startswith("UDP_"): return msg_name
+    if msg_name == "UDP_HELLO":
+        return "HELLO"
+    if msg_name == "UDP_ACK":
+        return "ACK"
+    if msg_name == "UDP_PING":
+        return "PING"
+    if msg_name == "RUDP_JOIN_MATCH":
+        return "JOIN_MATCH"
+    if msg_name.startswith("RUDP_"):
+        return msg_name
+    if msg_name.startswith("UDP_"):
+        return msg_name
     return "DATA"
 
 async def build_packet(msg_key, layout, send_option, cmd, order_id, flags, content, key, encrypted=True):
@@ -923,7 +981,8 @@ async def build_packet(msg_key, layout, send_option, cmd, order_id, flags, conte
     hdr = bytearray([msg_key, 0])
     for code in layout:
         value = {0: send_option, 1: cmd, 2: order_id, 3: flags, 4: len(body)}[code]
-        if _FIELD_SIZES[code] == 1: hdr.append((value & 0xFF) ^ k)
+        if _FIELD_SIZES[code] == 1:
+            hdr.append((value & 0xFF) ^ k)
         else:
             v = ((value & 0xFFFF) ^ v80) & 0xFFFF
             hdr.append(v & 0xFF)
@@ -965,26 +1024,33 @@ async def keepalive_ping(sock, ip, port, key_bytes, mask, stop_event):
         pk = ping_keys[i % len(ping_keys)]
         counter = int(time.time() * 1000) & 0xFFFFFFFF
         pkt = await build_packet(pk, nr, 0, 3, None, 0, struct.pack("<I", counter) + b"\x00\x00\x00", key_bytes, encrypted=False)
-        try: await loop.sock_sendto(sock, pkt, (ip, port))
-        except Exception: pass
+        try:
+            await loop.sock_sendto(sock, pkt, (ip, port))
+        except Exception:
+            pass
         i += 1
-        try: await asyncio.wait_for(stop_event.wait(), timeout=3.0)
-        except asyncio.TimeoutError: pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            pass
 
 async def try_header(buf, layout, k, v80):
     off = 2
     out = {}
     for code in layout:
         size = _FIELD_SIZES[code]
-        if off + size > len(buf): return None
+        if off + size > len(buf):
+            return None
         out[_FIELD_NAMES[code]] = (buf[off] ^ k) if size == 1 else ((buf[off] | (buf[off + 1] << 8)) ^ v80) & 0xFFFF
         off += size
     out["headerLen"] = off
     return out
 
 async def oicq_unpad(padded):
-    if not padded or len(padded) < 8: return None
-    if not all(padded[-1 - i] == 0 for i in range(7)): return None
+    if not padded or len(padded) < 8:
+        return None
+    if not all(padded[-1 - i] == 0 for i in range(7)):
+        return None
     pad_len = padded[0] & 0x07
     s = 3 + pad_len
     e = len(padded) - 7
@@ -992,7 +1058,8 @@ async def oicq_unpad(padded):
 
 async def decode_packet(packet, key, mask=None):
     data = bytes(packet) if isinstance(packet, bytes) else bytes.fromhex(packet)
-    if len(data) < 8: return None
+    if len(data) < 8:
+        return None
     k = key[0]
     v80 = ((k << 8) | k) & 0xFFFF
     crc_ok = (data[1] & 0x7F) == await crc7_buff(0, data[2:])
@@ -1005,16 +1072,24 @@ async def decode_packet(packet, key, mask=None):
         layouts += [("nonRUDP", list(p)) for p in itertools.permutations([0, 1, 3, 4])]
     for kind, layout in layouts:
         f = await try_header(data, layout, k, v80)
-        if not f or f["flags"] > 7 or f["sendOption"] > 7 or f["length"] != len(data) - f["headerLen"]: continue
+        if not f:
+            continue
+        if f["flags"] > 7 or f["sendOption"] > 7:
+            continue
+        if f["length"] != len(data) - f["headerLen"]:
+            continue
         body = data[f["headerLen"]:f["headerLen"] + f["length"]]
         content = None
         padded = None
         if f["flags"] & 1:
-            if len(body) < 8 or len(body) % 8 != 0: continue
+            if len(body) < 8 or len(body) % 8 != 0:
+                continue
             padded = await tea_cbc_decrypt(body, key)
             content = await oicq_unpad(padded)
-            if content is None: continue
-        else: content = body
+            if content is None:
+                continue
+        else:
+            content = body
         score = (1 if crc_ok else 0) + (1 if content is not None else 0)
         candidates.append({
             "kind": kind, "layout": layout, "headerLen": f["headerLen"],
@@ -1023,12 +1098,15 @@ async def decode_packet(packet, key, mask=None):
             "length": f["length"], "content": content, "crcOk": crc_ok,
             "padded": padded, "score": score, "total": len(data),
         })
-    if not candidates: return None
+    if not candidates:
+        return None
     candidates.sort(key=lambda c: (c["kind"] == "RUDP" or c["kind"] == "nonRUDP", c["score"]), reverse=True)
     return candidates[0]
 
 
-# ==================== MATCH ENGINE (UDP PROCESSOR) ====================
+# ============================================================
+# play_game — UDP MATCH (FIXED & DNS OPTIMIZED)
+# ============================================================
 async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
                     account_id, player_region, client_version, key, iv,
                     match_index: int):
@@ -1066,18 +1144,26 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
         last_activity = time.time()
         MAX_IDLE_BEFORE_HELLO_RESEND = 7.0
 
-        print_colored(f"🎮 [MATCH #{match_index}] UDP started → {server_ip_port} (DNS: {resolved_ip})", Colors.MAGENTA)
+        print_colored(
+            f"🎮 [MATCH #{match_index}] UDP started → {server_ip_port} (DNS: {resolved_ip})",
+            Colors.MAGENTA
+        )
 
         async def send_thunder_sharma_inline():
             nonlocal ack_state, thunder_sent, sharma_sent
-            if thunder_sent: return
+            if thunder_sent:
+                return
             async with send_lock:
-                if thunder_sent: return
+                if thunder_sent:
+                    return
                 try:
                     await loop.sock_sendto(sock, bytes.fromhex(thunder), (resolved_ip, port))
                     thunder_sent = True
                     await asyncio.sleep(0.1)
-                    prepare_ack = await build_packet(0x68, (await layouts_from_mask(match_code))[1], 0, 2, None, 1, b"\x01\x00", udp_key_bytes)
+                    prepare_ack = await build_packet(
+                        0x68, (await layouts_from_mask(match_code))[1],
+                        0, 2, None, 1, b"\x01\x00", udp_key_bytes
+                    )
                     await loop.sock_sendto(sock, prepare_ack, (resolved_ip, port))
                     await asyncio.sleep(0.2)
                     await loop.sock_sendto(sock, bytes.fromhex(sharma), (resolved_ip, port))
@@ -1088,39 +1174,61 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
                     print_error(f"[MATCH #{match_index}] send error: {e}")
 
         while not local_closed:
-            if time.time() - match_start_time > MAX_MATCH_DURATION: break
+            if time.time() - match_start_time > MAX_MATCH_DURATION:
+                break
             try:
-                response, server_addr = await asyncio.wait_for(loop.sock_recvfrom(sock, 65535), timeout=1.5)
+                response, server_addr = await asyncio.wait_for(
+                    loop.sock_recvfrom(sock, 65535), timeout=1.5
+                )
                 if response:
                     last_activity = time.time()
                     frame = await decode_packet(response, udp_key_bytes, match_code)
                     if frame:
                         ptype = await classify(frame)
+
                         if frame['cmd'] in [103, 107]:
-                            print_success(f"[MATCH #{match_index}] Completed (cmd {frame['cmd']})")
+                            print_success(
+                                f"[MATCH #{match_index}] Completed (cmd {frame['cmd']})"
+                            )
                             completed_cleanly = True
                             local_closed = True
                             continue
+
                         if frame['cmd'] == 101:
                             try:
-                                ack_pkt = await build_packet(0x68, (await layouts_from_mask(match_code))[1], 0, 2, None, 1, b"\x01\x00", udp_key_bytes)
+                                ack_pkt = await build_packet(
+                                    0x68, (await layouts_from_mask(match_code))[1],
+                                    0, 2, None, 1, b"\x01\x00", udp_key_bytes
+                                )
                                 await loop.sock_sendto(sock, ack_pkt, server_addr)
-                            except Exception: pass
+                            except Exception:
+                                pass
                             continue
+
                         if ptype in ["ACK", "PING", "HELLO", "JOIN_MATCH"]:
                             if ptype == "HELLO" and ack_state == "waiting_for_hello_reply":
-                                typ, reply = await reply_for(frame, udp_key_bytes, match_code, ack_style="short")
-                                if reply: await loop.sock_sendto(sock, reply, server_addr)
+                                typ, reply = await reply_for(
+                                    frame, udp_key_bytes, match_code, ack_style="short"
+                                )
+                                if reply:
+                                    await loop.sock_sendto(sock, reply, server_addr)
                                 ack_state = "ack_sent_waiting"
                             elif ptype == "ACK":
-                                if ack_state in ["waiting_for_hello_reply", "ack_sent_waiting"]:
+                                if ack_state == "waiting_for_hello_reply":
+                                    typ, reply = await reply_for(frame, udp_key_bytes, match_code)
+                                    if reply:
+                                        await loop.sock_sendto(sock, reply, server_addr)
+                                    ack_state = "ready_to_send_thunder"
+                                elif ack_state == "ack_sent_waiting":
                                     ack_state = "ready_to_send_thunder"
                                 else:
                                     typ, reply = await reply_for(frame, udp_key_bytes, match_code)
-                                    if reply: await loop.sock_sendto(sock, reply, server_addr)
+                                    if reply:
+                                        await loop.sock_sendto(sock, reply, server_addr)
                             elif ptype == "PING":
                                 typ, reply = await reply_for(frame, udp_key_bytes, match_code)
-                                if reply: await loop.sock_sendto(sock, reply, server_addr)
+                                if reply:
+                                    await loop.sock_sendto(sock, reply, server_addr)
                             elif ptype == "JOIN_MATCH" and not join_match_received:
                                 typ, reply = await reply_for(frame, udp_key_bytes, match_code)
                                 if reply:
@@ -1132,15 +1240,26 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
                 elif ack_state == "waiting_for_hello_reply":
                     if (time.time() - last_activity) > MAX_IDLE_BEFORE_HELLO_RESEND:
                         try:
-                            pkt = await build_hello_packet(f"{account_id}_2585", udp_key_bytes, match_code)
+                            pkt = await build_hello_packet(
+                                f"{account_id}_2585", udp_key_bytes, match_code
+                            )
                             await loop.sock_sendto(sock, bytes.fromhex(pkt), (resolved_ip, port))
-                        except Exception: pass
+                        except Exception:
+                            pass
                         last_activity = time.time()
-                    if (time.time() - match_start_time) > 25.0: break
+                    if (time.time() - match_start_time) > 25.0:
+                        print_warning(f"[MATCH #{match_index}] Handshake timeout")
+                        break
                 elif ack_state == "thunder_sharma_sent":
                     if (time.time() - last_activity) > MATCH_IDLE_TIMEOUT:
+                        print_success(f"[MATCH #{match_index}] Finished naturally")
                         completed_cleanly = True
                         break
+                continue
+            except BlockingIOError:
+                await asyncio.sleep(0.05)
+            except OSError:
+                await asyncio.sleep(0.5)
                 continue
             except Exception:
                 await asyncio.sleep(0.5)
@@ -1155,22 +1274,37 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
         return f"match #{match_index} error"
     finally:
         if completed_cleanly:
-            try: bot_state.increment_match(uid_str)
-            except Exception: pass
+            try:
+                bot_state.increment_match(uid_str)
+            except Exception:
+                pass
         ping_stop.set()
         if ping_task:
             ping_task.cancel()
-            try: await ping_task
-            except asyncio.CancelledError: pass
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
         if sock:
-            try: sock.close()
-            except Exception: pass
+            try:
+                sock.close()
+            except Exception:
+                pass
         remaining = await _dec_match(uid_str)
-        try: bot_state.update_status(uid_str, "IN_MATCH" if remaining > 0 else "ONLINE", remaining)
-        except Exception: pass
+        total = await _get_total_match_count()
+        print_info(
+            f"[MATCH #{match_index}] Closed. "
+            f"UID active: {remaining} | Total active: {total}"
+        )
+        try:
+            bot_state.update_status(uid_str, "IN_MATCH" if remaining > 0 else "ONLINE", remaining)
+        except Exception:
+            pass
 
 
-# ==================== MAIN TCP FUNCTIONAL LONE WOLF ====================
+# ============================================================
+# 🔥 functional_lone_wolf — TRUE Parallel + Smart Cache + DNS
+# ============================================================
 async def functional_lone_wolf(addrs, starter_packet, account_region, client_version,
                                 key, iv, account_id="", account_data=None,
                                 max_reconnects=10):
@@ -1181,6 +1315,7 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
     search_attempts = 0
     last_start_time = 0.0
     uid_str = str(account_id)
+
     consecutive_parse_failures = 0
 
     current_token = starter_packet
@@ -1204,29 +1339,45 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                         current_key = fresh['aes_ak']
                         current_iv = fresh['iv_i']
                         current_token = await build_tcp_startup_packet(
-                            fresh['account_id'], fresh['token'], fresh['server_time'],
-                            current_key, current_iv, region=fresh.get('region', account_region), typ='OnLine'
+                            fresh['account_id'],
+                            fresh['token'],
+                            fresh['server_time'],
+                            current_key,
+                            current_iv,
+                            region=fresh.get('region', account_region),
+                            typ='OnLine'
                         )
                     else:
+                        print_warning(f"[FUNCTIONAL] Cache miss for {uid_str} → re-login needed")
+                        try:
+                            if current_account_data.get('auth_uid'):
+                                cache_invalidate(str(current_account_data['auth_uid']))
+                            if current_account_data.get('auth_token'):
+                                cache_invalidate(f"tok_{current_account_data['auth_token'][:20]}")
+                        except Exception:
+                            pass
                         raise ConnectionError("Cache expired, triggering fresh login")
 
                 resolved_ip = await resolve_host_cloudflare(ip)
                 reader, writer = await asyncio.open_connection(resolved_ip, int(port))
                 
                 raw_sock = writer.get_extra_info('socket')
-                if raw_sock: optimize_tcp_socket(raw_sock)
+                if raw_sock:
+                    optimize_tcp_socket(raw_sock)
                 
                 writer.write(bytes.fromhex(current_token))
                 await writer.drain()
 
+                # Send initial keepalive pulse right after connecting in OB55
                 try:
                     init_ka = await send_keep_alive(account_region)
                     if init_ka and writer and not writer.is_closing():
                         writer.write(init_ka)
                         await asyncio.wait_for(writer.drain(), timeout=3)
-                except Exception: pass
+                except Exception:
+                    pass
 
-                print_success(f"[FUNCTIONAL] TCP Connected: {uid_str} (DNS: {resolved_ip})")
+                print_success(f"[FUNCTIONAL] TCP Gateway Connected for UID: {uid_str} (DNS: {resolved_ip})")
                 reconnects = 0
                 no_response_count = 0
                 last_start_time = 0.0
@@ -1234,11 +1385,20 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                 async def send_start_match():
                     nonlocal search_attempts, last_start_time
                     search_attempts += 1
+                    current_region = "BD"
+                    print_info(f"[LONE WOLF] Sending StartMatch #{search_attempts} region: {current_region}")
                     try:
                         await asyncio.sleep(random.uniform(0.3, 0.6))
-                        await start_game_lone_wolf("BD", client_version, writer, current_key, current_iv)
+                        await start_game_lone_wolf(
+                            current_region, client_version, writer,
+                            current_key, current_iv
+                        )
+                        print_success("[LONE WOLF] StartMatch packet sent")
                         active = await _get_match_count(uid_str)
-                        bot_state.update_status(uid_str, "SEARCHING", active)
+                        try:
+                            bot_state.update_status(uid_str, "SEARCHING", active)
+                        except Exception:
+                            pass
                     except Exception as e:
                         print_error(f"start_game_lone_wolf error: {e}")
                     last_start_time = asyncio.get_running_loop().time()
@@ -1247,8 +1407,16 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
 
                 while True:
                     play_matches[:] = [m for m in play_matches if not m.done()]
+
                     active_count = await _get_match_count(uid_str)
-                    bot_state.update_status(uid_str, "ONLINE" if active_count == 0 else "IN_MATCH", active_count)
+                    try:
+                        bot_state.update_status(
+                            uid_str,
+                            "ONLINE" if active_count == 0 else "IN_MATCH",
+                            active_count
+                        )
+                    except Exception:
+                        pass
 
                     now = asyncio.get_running_loop().time()
                     if now - last_start_time >= START_MATCH_INTERVAL:
@@ -1258,19 +1426,27 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                         data = await asyncio.wait_for(reader.read(8192), timeout=0.5)
                     except asyncio.TimeoutError:
                         no_response_count += 1
-                        if no_response_count > 80: raise ConnectionError("Gateway idle timeout")
+                        if no_response_count > 80:
+                            print_warning(f"[FUNCTIONAL] Gateway silent ({uid_str}). Reconnecting...")
+                            raise ConnectionError("Gateway idle timeout")
                         continue
 
-                    if not data: raise ConnectionError("Connection closed by server")
+                    if not data:
+                        raise ConnectionError("Connection closed by server")
 
                     hex_data = data.hex()
                     packet_length = len(data)
                     no_response_count = 0
 
-                    if hex_data.startswith("0300") and 10 < packet_length < 30: continue
+                    if hex_data.startswith("0300") and 10 < packet_length < 30:
+                        print_info("Match starting, please wait...")
+                        continue
 
                     if hex_data.startswith("0300") and packet_length >= 300:
-                        print_colored("MATCH FOUND! Loading...", Colors.GREEN)
+                        print_colored("=" * 60, Colors.GREEN)
+                        print_colored(f"MATCH FOUND! Loading...", Colors.GREEN)
+                        print_colored("=" * 60, Colors.GREEN)
+
                         try:
                             res = json.loads(await decode_protobuf(hex_data[10:]))
                             token = None
@@ -1280,92 +1456,174 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                             match_account_id = None
                             block_val = None
 
-                            if '42' in res and 'data' in res['42']: match_code = res['42']['data']
+                            if '42' in res and 'data' in res['42']:
+                                match_code = res['42']['data']
                             if '5' in res and 'data' in res['5']:
                                 res_field5 = res['5']['data']
                                 server_ip_port = res_field5.get('2', {}).get('data')
                                 udp_key = res_field5.get('3', {}).get('data')
                                 token = res_field5.get('4', {}).get('data')
-                                if '42' in res_field5: match_code = res_field5['42']['data']
-                            if '1' in res and 'data' in res['1']: match_account_id = res['1']['data']
-                            if '5' in res and 'data' in res['5']: block_val = res['5']['data'].get('1', {}).get('data')
+                                if '42' in res_field5:
+                                    match_code = res_field5['42']['data']
+                            if '1' in res and 'data' in res['1']:
+                                match_account_id = res['1']['data']
+                            if '5' in res and 'data' in res['5']:
+                                block_val = res['5']['data'].get('1', {}).get('data')
 
                             effective_acc_id = match_account_id or account_id or "BD_BOT"
 
                             if token and udp_key and match_code and server_ip_port:
-                                acc_tok = current_account_data.get('access_token', '') if current_account_data else ""
+                                acc_tok = ""
+                                if current_account_data:
+                                    acc_tok = current_account_data.get('access_token', '') or ""
                                 thunder, sharma = await build_match_startup_packets(
                                     token, udp_key, match_code, effective_acc_id, block_val or 0,
-                                    server_ip=server_ip_port, region=account_region,
-                                    client_version=client_version, access_token=acc_tok
+                                    server_ip=server_ip_port,
+                                    region=account_region,
+                                    client_version=client_version,
+                                    access_token=acc_tok
                                 )
 
                                 match_index = await _inc_match(uid_str)
+                                total = await _get_total_match_count()
+                                print_colored(
+                                    f"🚀 [MATCH #{match_index}] UDP starting → {server_ip_port} (background)",
+                                    Colors.CYAN
+                                )
+                                print_success(
+                                    f"[FUNCTIONAL] UDP task started. "
+                                    f"UID active: {match_index} | Total: {total}"
+                                )
+
                                 new_match = asyncio.create_task(
                                     play_game(
-                                        server_ip_port, thunder, sharma, udp_key, match_code,
-                                        effective_acc_id, "BD", client_version, current_key, current_iv,
+                                        server_ip_port,
+                                        thunder,
+                                        sharma,
+                                        udp_key,
+                                        match_code,
+                                        effective_acc_id,
+                                        "BD",
+                                        client_version,
+                                        current_key,
+                                        current_iv,
                                         match_index=match_index
                                     )
                                 )
                                 play_matches.append(new_match)
+
                                 consecutive_parse_failures = 0
 
                                 try:
                                     writer.close()
                                     await writer.wait_closed()
-                                except Exception: pass
+                                except Exception:
+                                    pass
 
+                                print_info(
+                                    f"[OFFLINE] {NEW_MATCH_DELAY}s offline → "
+                                    f"reload token → new StartMatch"
+                                )
                                 await asyncio.sleep(NEW_MATCH_DELAY)
                                 reconnects = 0
-                                break
+                                break 
+
                             else:
                                 consecutive_parse_failures += 1
+                                print_warning(
+                                    f"[FUNCTIONAL] Non-match big packet "
+                                    f"(#{consecutive_parse_failures}/{MAX_CONSECUTIVE_PARSE_FAILURES}) "
+                                    f"→ reconnecting"
+                                )
+
                                 if consecutive_parse_failures >= MAX_CONSECUTIVE_PARSE_FAILURES:
+                                    print_error(
+                                        f"[FUNCTIONAL] {MAX_CONSECUTIVE_PARSE_FAILURES}x parse failures "
+                                        f"→ invalidating cache for fresh login"
+                                    )
                                     if current_account_data:
-                                        if current_account_data.get('auth_uid'): cache_invalidate(str(current_account_data['auth_uid']))
-                                        if current_account_data.get('auth_token'): cache_invalidate(f"tok_{current_account_data['auth_token'][:20]}")
+                                        try:
+                                            if current_account_data.get('auth_uid'):
+                                                cache_invalidate(str(current_account_data['auth_uid']))
+                                            if current_account_data.get('auth_token'):
+                                                cache_invalidate(f"tok_{current_account_data['auth_token'][:20]}")
+                                        except Exception:
+                                            pass
                                     consecutive_parse_failures = 0
 
                                 try:
                                     writer.close()
                                     await writer.wait_closed()
-                                except Exception: pass
+                                except Exception:
+                                    pass
                                 await asyncio.sleep(NON_MATCH_RECONNECT_DELAY)
                                 break
+
                         except Exception as e:
-                            print_error(f"[FUNCTIONAL] Packet error: {e}")
+                            print_error(f"[FUNCTIONAL] Match packet error: {e}")
+                            consecutive_parse_failures += 1
+                            if consecutive_parse_failures >= MAX_CONSECUTIVE_PARSE_FAILURES:
+                                if current_account_data:
+                                    try:
+                                        if current_account_data.get('auth_uid'):
+                                            cache_invalidate(str(current_account_data['auth_uid']))
+                                        if current_account_data.get('auth_token'):
+                                            cache_invalidate(f"tok_{current_account_data['auth_token'][:20]}")
+                                    except Exception:
+                                        pass
+                                consecutive_parse_failures = 0
                             try:
                                 writer.close()
                                 await writer.wait_closed()
-                            except Exception: pass
+                            except Exception:
+                                pass
                             await asyncio.sleep(NON_MATCH_RECONNECT_DELAY)
                             break
 
+                    if 30 <= packet_length <= 40:
+                        continue
+
             except asyncio.CancelledError:
+                print_warning(f"[FUNCTIONAL] Cancelled — cancelling {len(play_matches)} UDP matches")
                 for m in play_matches:
-                    if not m.done(): m.cancel()
-                if play_matches: await asyncio.gather(*play_matches, return_exceptions=True)
+                    if not m.done():
+                        m.cancel()
+                if play_matches:
+                    await asyncio.gather(*play_matches, return_exceptions=True)
                 play_matches.clear()
                 raise
             except Exception as e:
-                print_error(f"[FUNCTIONAL] TCP Error ({uid_str}): {e}")
+                print_error(f"[FUNCTIONAL] TCP state ({uid_str}): {e}")
+
+                play_matches[:] = [m for m in play_matches if not m.done()]
+
                 if writer:
                     try:
                         writer.close()
                         await writer.wait_closed()
-                    except Exception: pass
+                    except Exception:
+                        pass
+
+                if "Cache expired" in str(e):
+                    print_warning(f"[FUNCTIONAL] Triggering re-login for {uid_str}")
+                    break
+
                 reconnects += 1
                 if reconnects > max_reconnects:
+                    print_error("[FUNCTIONAL] Max reconnects reached, retrying...")
                     reconnects = 0
                     await asyncio.sleep(3)
                     continue
+
                 await asyncio.sleep(min(reconnects, 2))
 
     except asyncio.CancelledError:
+        print_warning(f"[FUNCTIONAL] Outer cancelled. {len(play_matches)} UDP matches still running.")
         for m in play_matches:
-            if not m.done(): m.cancel()
-        if play_matches: await asyncio.gather(*play_matches, return_exceptions=True)
+            if not m.done():
+                m.cancel()
+        if play_matches:
+            await asyncio.gather(*play_matches, return_exceptions=True)
         play_matches.clear()
         raise
 
@@ -1379,19 +1637,23 @@ async def informational(addrs, starter_packet, key, iv, region="BD", max_reconne
         try:
             resolved_ip = await resolve_host_cloudflare(ip)
             reader, writer = await asyncio.open_connection(resolved_ip, int(port))
+            
             raw_sock = writer.get_extra_info('socket')
-            if raw_sock: optimize_tcp_socket(raw_sock)
+            if raw_sock:
+                optimize_tcp_socket(raw_sock)
                 
             writer.write(bytes.fromhex(starter_packet))
             await writer.drain()
             reconnects = 0
 
+            # Initial keepalive right after connecting
             try:
                 init_ka = await send_keep_alive(region)
                 if init_ka and writer and not writer.is_closing():
                     writer.write(init_ka)
                     await asyncio.wait_for(writer.drain(), timeout=3)
-            except Exception: pass
+            except Exception:
+                pass
 
             async def info_keepalive():
                 ka_bytes = await send_keep_alive(region)
@@ -1401,42 +1663,55 @@ async def informational(addrs, starter_packet, key, iv, region="BD", max_reconne
                         if writer and not writer.is_closing():
                             writer.write(ka_bytes)
                             await writer.drain()
-                    except Exception: break
+                    except Exception:
+                        break
 
             ping_task = asyncio.create_task(info_keepalive())
+
             while True:
                 data = await reader.read(8192)
-                if not data: raise ConnectionError("Connection closed")
+                if not data:
+                    raise ConnectionError("Connection closed")
         except asyncio.CancelledError:
-            if ping_task: ping_task.cancel()
+            if ping_task:
+                ping_task.cancel()
             if writer:
                 try:
                     writer.close()
                     await writer.wait_closed()
-                except Exception: pass
+                except Exception:
+                    pass
             raise
         except Exception:
-            if ping_task: ping_task.cancel()
+            if ping_task:
+                ping_task.cancel()
             if writer:
                 try:
                     writer.close()
                     await writer.wait_closed()
-                except Exception: pass
+                except Exception:
+                    pass
             reconnects += 1
             if reconnects > max_reconnects:
                 await asyncio.sleep(3)
                 reconnects = 0
-            else: await asyncio.sleep(1)
+            else:
+                await asyncio.sleep(1)
 
 
 # ==================== ACCOUNT PROCESSORS ====================
+
 def _register_credentials(account_data: Dict):
     try:
         acc_id = str(account_data['account_id'])
         bot_state.account_credentials[acc_id] = account_data
-        if account_data.get('auth_uid'): bot_state.account_credentials[str(account_data['auth_uid'])] = account_data
-        if account_data.get('auth_token'): bot_state.account_credentials[f"tok_{account_data['auth_token'][:20]}"] = account_data
-    except Exception: pass
+        if account_data.get('auth_uid'):
+            bot_state.account_credentials[str(account_data['auth_uid'])] = account_data
+        if account_data.get('auth_token'):
+            bot_state.account_credentials[f"tok_{account_data['auth_token'][:20]}"] = account_data
+    except Exception:
+        pass
+
 
 async def refresh_account_profile(account_data_or_uid: Any):
     try:
@@ -1447,14 +1722,16 @@ async def refresh_account_profile(account_data_or_uid: Any):
             account_data = account_data_or_uid
             uid = str(account_data.get('account_id'))
 
-        if not account_data: return
+        if not account_data:
+            return
 
         url = account_data.get('server_url')
         token = account_data.get('token')
         release_version = account_data.get('release_version')
         payload = account_data.get('login_payload_data')
 
-        if not (url and token and release_version and payload): return
+        if not (url and token and release_version and payload):
+            return
 
         res = await send_getlogin(payload, url, token, release_version)
         if res:
@@ -1465,39 +1742,55 @@ async def refresh_account_profile(account_data_or_uid: Any):
             nickname = res_proto.nickname or get_proto_field(dict_res, 4, "")
 
             acc_id = str(account_data['account_id'])
-            if exp > 0: bot_state.update_exp(acc_id, exp, level)
-            if likes > 0 and acc_id in bot_state.accounts: bot_state.accounts[acc_id]["likes"] = likes
-            if nickname and acc_id in bot_state.accounts: bot_state.accounts[acc_id]["nickname"] = nickname
+            if exp > 0:
+                bot_state.update_exp(acc_id, exp, level)
+            if likes > 0 and acc_id in bot_state.accounts:
+                bot_state.accounts[acc_id]["likes"] = likes
+            if nickname and acc_id in bot_state.accounts:
+                bot_state.accounts[acc_id]["nickname"] = nickname
+            print_info(f"[EXP-REFRESH] UID {acc_id} -> Level: {level}, EXP: {exp}")
     except Exception as e:
         print_error(f"refresh_account_profile error: {e}")
+
 
 async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
     cached = cache_get(uid)
     if cached:
+        print_success(f"[CACHE HIT] UID {uid} loaded from token_cache.json (no login)")
         acc_id = str(cached['account_id'])
         bot_state.register_account(
-            uid=acc_id, nickname=cached.get('nickname', f"Player_{acc_id}"),
-            region=cached.get('region', 'BD'), level=cached.get('level', 1),
-            exp=cached.get('exp', 0), likes=cached.get('likes', 0)
+            uid=acc_id,
+            nickname=cached.get('nickname', f"Player_{acc_id}"),
+            region=cached.get('region', 'BD'),
+            level=cached.get('level', 1),
+            exp=cached.get('exp', 0),
+            likes=cached.get('likes', 0)
         )
         _register_credentials(cached)
         return cached
 
+    print_info(f"[LOGIN] Full login for UID {uid}...")
     try:
         verconfig_res = await version_config()
-        if verconfig_res is None: return None
+        if verconfig_res is None:
+            return None
         release_version, client_version, server_url = verconfig_res
         
         tokengrant_response = await get_access_token(uid, password)
-        if tokengrant_response is None: return None
+        if tokengrant_response is None:
+            return None
         open_id, access_token, platform = tokengrant_response
         
+        # 🔥 1ta id 1ta Device Injection
         device_info = get_device_for_account(uid)
+        
         login_payload_data = await build_majorlogin_payload(open_id, access_token, platform, client_version, device_info)
         majorlogin_response = await send_majorlogin(login_payload_data, release_version, server_url)
-        if majorlogin_response is None: return None
+        if majorlogin_response is None:
+            return None
         getlogin_result = await send_getlogin(login_payload_data, majorlogin_response.url, majorlogin_response.token, release_version)
-        if getlogin_result is None: return None
+        if getlogin_result is None:
+            return None
         res_proto, dict_res = getlogin_result
 
         acc_id = str(majorlogin_response.account_id)
@@ -1540,22 +1833,29 @@ async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
         print_error(f"process_account_uid_pass error: {e}")
         return None
 
+
 async def process_account_token(access_token: str) -> Optional[Dict]:
     cache_key = f"tok_{access_token[:20]}"
     cached = cache_get(cache_key)
     if cached:
+        print_success(f"[CACHE HIT] Token {access_token[:10]}... loaded from cache")
         acc_id = str(cached['account_id'])
         bot_state.register_account(
-            uid=acc_id, nickname=cached.get('nickname', f"Player_{acc_id}"),
-            region=cached.get('region', 'BD'), level=cached.get('level', 1),
-            exp=cached.get('exp', 0), likes=cached.get('likes', 0)
+            uid=acc_id,
+            nickname=cached.get('nickname', f"Player_{acc_id}"),
+            region=cached.get('region', 'BD'),
+            level=cached.get('level', 1),
+            exp=cached.get('exp', 0),
+            likes=cached.get('likes', 0)
         )
         _register_credentials(cached)
         return cached
 
+    print_info("[LOGIN] Full login with Access Token...")
     try:
         verconfig_res = await version_config()
-        if verconfig_res is None: return None
+        if verconfig_res is None:
+            return None
         release_version, client_version, server_url = verconfig_res
 
         import requests
@@ -1570,22 +1870,34 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         resp = await asyncio.to_thread(requests.get, url, headers=hdrs, timeout=10)
         data = resp.json()
 
-        if 'error' in data: return None
+        if 'error' in data:
+            return None
 
         open_id = data.get('open_id')
         platform = data.get('platform', 4)
 
-        if not open_id: return None
+        if not open_id:
+            return None
 
+        # 🔥 1ta id 1ta Device Injection (using unique open_id as the key)
         device_info = get_device_for_account(open_id)
+
         login_payload_data = await build_majorlogin_payload(open_id, access_token, str(platform), client_version, device_info)
-        if not login_payload_data: return None
+        if not login_payload_data:
+            return None
 
         majorlogin_response = await send_majorlogin(login_payload_data, release_version, server_url)
-        if majorlogin_response is None: return None
+        if majorlogin_response is None:
+            return None
 
-        getlogin_result = await send_getlogin(login_payload_data, majorlogin_response.url, majorlogin_response.token, release_version)
-        if getlogin_result is None: return None
+        getlogin_result = await send_getlogin(
+            login_payload_data,
+            majorlogin_response.url,
+            majorlogin_response.token,
+            release_version
+        )
+        if getlogin_result is None:
+            return None
 
         res_proto, dict_res = getlogin_result
         acc_id = str(majorlogin_response.account_id)
@@ -1617,6 +1929,7 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
             'client_version': client_version,
             'server_url': majorlogin_response.url,
             'login_payload_data': login_payload_data,
+            'platform': platform,
             'auth_type': 'token',
             'auth_token': access_token
         }
@@ -1627,6 +1940,7 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         print_error(f"process_account_token error: {e}")
         return None
 
+
 async def run_account_worker(account_data: Dict, label: str):
     acc_id = str(account_data['account_id'])
     informational_task = None
@@ -1634,1049 +1948,143 @@ async def run_account_worker(account_data: Dict, label: str):
     try:
         reg = account_data.get('region', 'BD')
         tcp_packet_online = await build_tcp_startup_packet(
-            account_data['account_id'], account_data['token'], account_data['server_time'],
-            account_data['aes_ak'], account_data['iv_i'], region=reg, typ='OnLine'
+            account_data['account_id'],
+            account_data['token'],
+            account_data['server_time'],
+            account_data['aes_ak'],
+            account_data['iv_i'],
+            region=reg,
+            typ='OnLine'
         )
+
         tcp_packet_chat = await build_tcp_startup_packet(
-            account_data['account_id'], account_data['token'], account_data['server_time'],
-            account_data['aes_ak'], account_data['iv_i'], region=reg, typ='ChaT'
+            account_data['account_id'],
+            account_data['token'],
+            account_data['server_time'],
+            account_data['aes_ak'],
+            account_data['iv_i'],
+            region=reg,
+            typ='ChaT'
         )
 
         informational_task = asyncio.create_task(
-            informational(account_data['informational_addrs'], tcp_packet_chat, account_data['aes_ak'], account_data['iv_i'], region=reg)
+            informational(
+                account_data['informational_addrs'],
+                tcp_packet_chat,
+                account_data['aes_ak'],
+                account_data['iv_i'],
+                region=reg
+            )
         )
 
         async def exp_refresher():
             while True:
                 await asyncio.sleep(90)
                 fresh = bot_state.account_credentials.get(acc_id)
-                if fresh: await refresh_account_profile(fresh)
+                if fresh:
+                    await refresh_account_profile(fresh)
 
         exp_task = asyncio.create_task(exp_refresher())
+
         functional_task = asyncio.create_task(
             functional_lone_wolf(
-                account_data['functional_addrs'], tcp_packet_online, account_data['region'],
-                account_data['client_version'], account_data['aes_ak'], account_data['iv_i'],
-                account_id=acc_id, account_data=account_data
+                account_data['functional_addrs'],
+                tcp_packet_online,
+                account_data['region'],
+                account_data['client_version'],
+                account_data['aes_ak'],
+                account_data['iv_i'],
+                account_id=acc_id,
+                account_data=account_data
             )
         )
+
         await functional_task
 
-    except asyncio.CancelledError: raise
-    except Exception as e: print_error(f"run_account_worker error for {label}: {e}")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        print_error(f"run_account_worker error for {label}: {e}")
     finally:
         for t in (informational_task, exp_task):
-            if t and not t.done(): t.cancel()
+            if t and not t.done():
+                t.cancel()
+        for t in (informational_task, exp_task):
+            if t:
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
 
 async def account_loop_guest(uid: str, password: str):
     while True:
         try:
-            bot_state.update_status(str(uid), "CONNECTING")
+            print_info(f"[LOGIN] Starting login for Guest UID: {uid}...")
+            try:
+                bot_state.update_status(str(uid), "CONNECTING")
+            except Exception:
+                pass
             account_data = await process_account_uid_pass(uid, password)
             if not account_data:
-                bot_state.update_status(str(uid), "ERROR")
+                print_error(f"Login failed for UID: {uid}. Retrying in 15 seconds...")
+                try:
+                    bot_state.update_status(str(uid), "ERROR")
+                except Exception:
+                    pass
                 await asyncio.sleep(15)
                 continue
+
             await run_account_worker(account_data, uid)
+            print_warning(f"Session finished for {uid}. Reconnecting in 3s...")
             await asyncio.sleep(3)
         except asyncio.CancelledError:
-            bot_state.update_status(str(uid), "OFFLINE")
+            print_warning(f"Worker for {uid} stopped.")
+            try:
+                bot_state.update_status(str(uid), "OFFLINE")
+            except Exception:
+                pass
             break
-        except Exception:
+        except Exception as e:
+            print_error(f"Error for UID {uid}: {e}. Retrying in 10s...")
             await asyncio.sleep(10)
 
+
 async def account_loop_token(token: str):
+    token_label = token[:10]
     while True:
         try:
+            print_info("[LOGIN] Starting login with Access Token...")
             account_data = await process_account_token(token)
             if not account_data:
+                print_error("Login failed for Token. Retrying in 15 seconds...")
                 await asyncio.sleep(15)
                 continue
+
             acc_id = str(account_data['account_id'])
             await run_account_worker(account_data, acc_id)
+            print_warning("Token session finished. Reconnecting in 3s...")
             await asyncio.sleep(3)
-        except asyncio.CancelledError: break
-        except Exception: await asyncio.sleep(10)
-
-
-# ==================== WEB APP (FASTAPI INTERFACE) ====================
-app = FastAPI(title="TEAM 84FF Level-Up Master Dashboard")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-
-HTML_UI = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TEAM 84FF | FreeFire Level Up Bot Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --bg-base: #060913;
-            --bg-card: rgba(13, 19, 36, 0.75);
-            --bg-card-hover: rgba(19, 27, 50, 0.9);
-            --border-card: rgba(0, 242, 254, 0.12);
-            --border-hover: rgba(0, 242, 254, 0.4);
-            --accent-cyan: #00f2fe;
-            --accent-blue: #4facfe;
-            --accent-purple: #7f00ff;
-            --accent-green: #00ff88;
-            --accent-red: #ff3366;
-            --accent-amber: #ffaa00;
-            --text-main: #f0f4fc;
-            --text-muted: #8e9bb5;
-            --glass-glow: 0 8px 32px 0 rgba(0, 242, 254, 0.08);
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Outfit', sans-serif;
-        }
-
-        body {
-            background-color: var(--bg-base);
-            background-image: 
-                radial-gradient(circle at 15% 15%, rgba(127, 0, 255, 0.14) 0%, transparent 45%),
-                radial-gradient(circle at 85% 85%, rgba(0, 242, 254, 0.12) 0%, transparent 45%),
-                linear-gradient(180deg, #060913 0%, #0a0e1c 100%);
-            color: var(--text-main);
-            min-height: 100vh;
-            padding: 24px;
-            overflow-x: hidden;
-        }
-
-        .container {
-            max-width: 1440px;
-            margin: 0 auto;
-        }
-
-        header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px 28px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-card);
-            border-radius: 20px;
-            backdrop-filter: blur(16px);
-            box-shadow: var(--glass-glow);
-            margin-bottom: 24px;
-        }
-
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .logo-box {
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-            border-radius: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-            color: #fff;
-            box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
-            animation: pulse-glow 3s infinite alternate;
-        }
-
-        @keyframes pulse-glow {
-            0% { box-shadow: 0 0 15px rgba(0, 242, 254, 0.3); }
-            100% { box-shadow: 0 0 25px rgba(127, 0, 255, 0.5); }
-        }
-
-        .brand-text h1 {
-            font-size: 22px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            background: linear-gradient(90deg, #ffffff, var(--accent-cyan));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .brand-text p {
-            font-size: 13px;
-            color: var(--text-muted);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 2px;
-        }
-
-        .live-tag {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(0, 255, 136, 0.12);
-            border: 1px solid rgba(0, 255, 136, 0.3);
-            color: var(--accent-green);
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-
-        .pulse-dot {
-            width: 7px;
-            height: 7px;
-            background: var(--accent-green);
-            border-radius: 50%;
-            animation: blink 1.2s infinite;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.8); }
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 18px;
-            border-radius: 12px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.25s ease;
-            border: none;
-            outline: none;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-            color: #040914;
-            box-shadow: 0 4px 16px rgba(0, 242, 254, 0.25);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 242, 254, 0.4);
-        }
-
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-card);
-            color: var(--text-main);
-        }
-
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: var(--border-hover);
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 18px;
-            margin-bottom: 24px;
-        }
-
-        .stat-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-card);
-            border-radius: 18px;
-            padding: 20px;
-            backdrop-filter: blur(14px);
-            display: flex;
-            align-items: center;
-            gap: 18px;
-            transition: all 0.3s ease;
-        }
-
-        .stat-card:hover {
-            border-color: var(--border-hover);
-            transform: translateY(-3px);
-            box-shadow: var(--glass-glow);
-        }
-
-        .stat-icon {
-            width: 52px;
-            height: 52px;
-            border-radius: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-        }
-
-        .stat-icon.cyan { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
-        .stat-icon.green { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); }
-        .stat-icon.purple { background: rgba(127, 0, 255, 0.15); color: #c084fc; }
-        .stat-icon.amber { background: rgba(255, 170, 0, 0.15); color: var(--accent-amber); }
-
-        .stat-content h3 {
-            font-size: 26px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            color: #fff;
-        }
-
-        .stat-content p {
-            font-size: 13px;
-            color: var(--text-muted);
-            font-weight: 500;
-        }
-
-        .dashboard-main {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 24px;
-        }
-
-        @media (max-width: 1024px) {
-            .dashboard-main { grid-template-columns: 1fr; }
-        }
-
-        .card-box {
-            background: var(--bg-card);
-            border: 1px solid var(--border-card);
-            border-radius: 20px;
-            padding: 24px;
-            backdrop-filter: blur(16px);
-        }
-
-        .box-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-
-        .box-title {
-            font-size: 18px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .accounts-list {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .account-card {
-            background: rgba(10, 15, 30, 0.65);
-            border: 1px solid rgba(255, 255, 255, 0.07);
-            border-radius: 16px;
-            padding: 20px;
-            transition: all 0.25s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .account-card:hover {
-            background: var(--bg-card-hover);
-            border-color: var(--border-hover);
-        }
-
-        .acc-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 14px;
-        }
-
-        .acc-profile {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .acc-avatar {
-            width: 44px;
-            height: 44px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #1e293b, #334155);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 16px;
-            color: var(--accent-cyan);
-            border: 1px solid rgba(0, 242, 254, 0.2);
-        }
-
-        .acc-info h4 {
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .region-badge {
-            background: rgba(255, 255, 255, 0.08);
-            color: #a5b4fc;
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-size: 10px;
-            font-weight: 700;
-        }
-
-        .acc-info span {
-            font-size: 12px;
-            color: var(--text-muted);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .acc-status {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            font-weight: 700;
-            padding: 4px 12px;
-            border-radius: 20px;
-        }
-
-        .status-online {
-            background: rgba(0, 255, 136, 0.12);
-            color: var(--accent-green);
-            border: 1px solid rgba(0, 255, 136, 0.25);
-        }
-
-        .status-match {
-            background: rgba(0, 242, 254, 0.15);
-            color: var(--accent-cyan);
-            border: 1px solid rgba(0, 242, 254, 0.4);
-            animation: pulse-border 1.5s infinite alternate;
-        }
-
-        @keyframes pulse-border {
-            0% { border-color: rgba(0, 242, 254, 0.3); }
-            100% { border-color: rgba(0, 242, 254, 0.8); }
-        }
-
-        .exp-box {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 12px;
-            background: rgba(0, 0, 0, 0.28);
-            padding: 12px 16px;
-            border-radius: 12px;
-            margin-bottom: 14px;
-        }
-
-        .exp-item {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .exp-label {
-            font-size: 11px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-
-        .exp-val {
-            font-size: 15px;
-            font-weight: 700;
-            font-family: 'JetBrains Mono', monospace;
-            color: #fff;
-        }
-
-        .exp-gained {
-            color: var(--accent-green) !important;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .gained-badge {
-            background: rgba(0, 255, 136, 0.16);
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        .level-progress {
-            margin-bottom: 14px;
-        }
-
-        .level-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            margin-bottom: 6px;
-            font-weight: 600;
-        }
-
-        .progress-bar-bg {
-            height: 6px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
-            border-radius: 10px;
-            transition: width 0.5s ease;
-        }
-
-        .acc-actions {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding-top: 10px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        .action-btns {
-            display: flex;
-            gap: 8px;
-        }
-
-        .icon-btn {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-card);
-            color: var(--text-muted);
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .icon-btn:hover {
-            background: rgba(0, 242, 254, 0.15);
-            color: var(--accent-cyan);
-            border-color: var(--accent-cyan);
-        }
-
-        .icon-btn.danger:hover {
-            background: rgba(255, 51, 102, 0.15);
-            color: var(--accent-red);
-            border-color: var(--accent-red);
-        }
-
-        .logs-box {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-
-        .log-stream {
-            flex: 1;
-            min-height: 480px;
-            max-height: 600px;
-            background: #03060f;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 14px;
-            padding: 14px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .log-stream::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .log-stream::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-        }
-
-        .log-item {
-            line-height: 1.4;
-            word-break: break-all;
-        }
-
-        .log-time { color: #64748b; margin-right: 6px; }
-        .log-info { color: #38bdf8; }
-        .log-success { color: #4ade80; }
-        .log-warning { color: #fbbf24; }
-        .log-error { color: #f87171; }
-
-        .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(3, 6, 15, 0.82);
-            backdrop-filter: blur(8px);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-        }
-
-        .modal-overlay.active { display: flex; }
-
-        .modal-card {
-            background: #0c1224;
-            border: 1px solid var(--border-card);
-            border-radius: 20px;
-            width: 100%;
-            max-width: 480px;
-            padding: 28px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-        }
-
-        .modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-
-        .modal-header h3 {
-            font-size: 18px;
-            font-weight: 700;
-        }
-
-        .form-group {
-            margin-bottom: 16px;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-        }
-
-        .form-input {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 10px 14px;
-            color: #fff;
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .form-input:focus {
-            border-color: var(--accent-cyan);
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-muted);
-        }
-
-        .empty-state i {
-            font-size: 42px;
-            margin-bottom: 12px;
-            color: rgba(255, 255, 255, 0.1);
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <div class="brand">
-                <div class="logo-box">
-                    <i class="fa-solid fa-bolt"></i>
-                </div>
-                <div class="brand-text">
-                    <h1>TEAM 84FF <span style="font-weight:400; color:var(--text-muted); font-size:16px;">| LEVEL UP BOT</span></h1>
-                    <p>
-                        <span class="live-tag"><span class="pulse-dot"></span> System Live</span>
-                        <span>• Safe Multi-Match Engine</span>
-                    </p>
-                </div>
-            </div>
-            <div class="header-actions">
-                <button class="btn btn-secondary" onclick="fetchStats()"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                <button class="btn btn-primary" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> Add Account</button>
-            </div>
-        </header>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon cyan"><i class="fa-solid fa-users"></i></div>
-                <div class="stat-content">
-                    <h3 id="stat-total-accounts">0</h3>
-                    <p>Active Accounts</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon green"><i class="fa-solid fa-angles-up"></i></div>
-                <div class="stat-content">
-                    <h3 id="stat-total-exp" style="color:var(--accent-green)">+0 EXP</h3>
-                    <p>Total EXP Gained</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon purple"><i class="fa-solid fa-gamepad"></i></div>
-                <div class="stat-content">
-                    <h3 id="stat-total-matches">0</h3>
-                    <p>Matches Completed</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon amber"><i class="fa-solid fa-shield-halved"></i></div>
-                <div class="stat-content">
-                    <h3 id="stat-uptime">00:00:00</h3>
-                    <p>Bot Uptime</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="dashboard-main">
-            <div class="card-box">
-                <div class="box-header">
-                    <div class="box-title">
-                        <i class="fa-solid fa-user-astronaut" style="color:var(--accent-cyan)"></i>
-                        <span>Live Accounts & EXP Monitor</span>
-                    </div>
-                </div>
-                <div class="accounts-list" id="accounts-container">
-                    <div class="empty-state">
-                        <i class="fa-solid fa-circle-notch fa-spin"></i>
-                        <p>Loading active accounts...</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card-box logs-box">
-                <div class="box-header">
-                    <div class="box-title">
-                        <i class="fa-solid fa-terminal" style="color:var(--accent-green)"></i>
-                        <span>Live Match & Bot Logs</span>
-                    </div>
-                    <span style="font-size:12px; color:var(--text-muted);">Real-time</span>
-                </div>
-                <div class="log-stream" id="log-stream">
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="add-modal">
-        <div class="modal-card">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-user-plus" style="color:var(--accent-cyan); margin-right:8px;"></i> Add New Account</h3>
-                <button class="icon-btn" onclick="closeAddModal()"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <form id="add-acc-form" onsubmit="submitAddAccount(event)">
-                <div class="form-group">
-                    <label>Account Type</label>
-                    <select class="form-input" id="acc-type" onchange="toggleFormType()">
-                        <option value="guest">Guest Account (UID + Password)</option>
-                        <option value="token">Access Token</option>
-                    </select>
-                </div>
-                <div id="guest-fields">
-                    <div class="form-group">
-                        <label>Guest UID</label>
-                        <input type="text" class="form-input" id="acc-uid" placeholder="e.g. 7644913583">
-                    </div>
-                    <div class="form-group">
-                        <label>Guest Password / Secret</label>
-                        <input type="text" class="form-input" id="acc-password" placeholder="e.g. ZERO_GRAVITY_4NM38">
-                    </div>
-                </div>
-                <div id="token-fields" style="display:none;">
-                    <div class="form-group">
-                        <label>Access Token</label>
-                        <textarea class="form-input" id="acc-token" rows="3" placeholder="Paste access token here..."></textarea>
-                    </div>
-                </div>
-                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Save & Start</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <script>
-        let startTime = Date.now();
-
-        function openAddModal() {
-            document.getElementById('add-modal').classList.add('active');
-        }
-
-        function closeAddModal() {
-            document.getElementById('add-modal').classList.remove('active');
-        }
-
-        function toggleFormType() {
-            const type = document.getElementById('acc-type').value;
-            document.getElementById('guest-fields').style.display = type === 'guest' ? 'block' : 'none';
-            document.getElementById('token-fields').style.display = type === 'token' ? 'block' : 'none';
-        }
-
-        async function submitAddAccount(e) {
-            e.preventDefault();
-            const type = document.getElementById('acc-type').value;
-            let payload = {};
-            if (type === 'guest') {
-                const uid = document.getElementById('acc-uid').value.trim();
-                const password = document.getElementById('acc-password').value.trim();
-                if (!uid || !password) return alert('Please enter both UID and Password');
-                payload = { uid, password };
-            } else {
-                const token = document.getElementById('acc-token').value.trim();
-                if (!token) return alert('Please enter token');
-                payload = { token };
-            }
-
-            try {
-                const res = await fetch('/api/account/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.status === 'ok') {
-                    closeAddModal();
-                    document.getElementById('add-acc-form').reset();
-                    fetchStats();
-                } else {
-                    alert('Error adding account: ' + (data.error || 'Unknown'));
-                }
-            } catch (err) {
-                alert('Request failed: ' + err);
-            }
-        }
-
-        async function deleteAccount(uid) {
-            if (!confirm('Are you sure you want to remove account ' + uid + '?')) return;
-            try {
-                await fetch('/api/account/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ uid })
-                });
-                fetchStats();
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
-        async function refreshAccountInfo(uid) {
-            try {
-                await fetch('/api/account/refresh', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ uid })
-                });
-                fetchStats();
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
-        async function fetchStats() {
-            try {
-                const res = await fetch('/api/stats');
-                const data = await res.json();
-
-                document.getElementById('stat-total-accounts').innerText = data.total_accounts;
-                document.getElementById('stat-total-exp').innerText = '+' + data.total_gained_exp.toLocaleString() + ' EXP';
-                document.getElementById('stat-total-matches').innerText = data.total_matches;
-
-                const container = document.getElementById('accounts-container');
-                if (data.accounts.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fa-solid fa-ghost"></i>
-                            <p>No active accounts running. Click "+ Add Account" to start!</p>
-                        </div>
-                    `;
-                } else {
-                    container.innerHTML = data.accounts.map(acc => {
-                        const gainedExp = acc.gained_exp || 0;
-                        const statusClass = acc.status === 'IN_MATCH' ? 'status-match' : 'status-online';
-                        const statusText = acc.status === 'IN_MATCH' ? `In Match (${acc.active_matches} active)` : acc.status;
-                        
-                        return `
-                            <div class="account-card">
-                                <div class="acc-top">
-                                    <div class="acc-profile">
-                                        <div class="acc-avatar"><i class="fa-solid fa-user"></i></div>
-                                        <div class="acc-info">
-                                            <h4>${escapeHtml(acc.nickname)} <span class="region-badge">${acc.region || 'BD'}</span></h4>
-                                            <span>UID: ${acc.uid}</span>
-                                        </div>
-                                    </div>
-                                    <div class="acc-status ${statusClass}">
-                                        <span class="pulse-dot"></span>
-                                        <span>${statusText}</span>
-                                    </div>
-                                </div>
-
-                                <div class="exp-box">
-                                    <div class="exp-item">
-                                        <span class="exp-label">Initial EXP</span>
-                                        <span class="exp-val">${acc.initial_exp.toLocaleString()}</span>
-                                    </div>
-                                    <div class="exp-item">
-                                        <span class="exp-label">Current EXP</span>
-                                        <span class="exp-val">${acc.current_exp.toLocaleString()}</span>
-                                    </div>
-                                    <div class="exp-item">
-                                        <span class="exp-label">EXP Gained</span>
-                                        <span class="exp-val exp-gained">
-                                            <span class="gained-badge">+${gainedExp.toLocaleString()} EXP</span>
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div class="level-progress">
-                                    <div class="level-labels">
-                                        <span style="color:var(--accent-cyan)">Level ${acc.level}</span>
-                                        <span style="color:var(--text-muted)">Matches: ${acc.matches_played}</span>
-                                    </div>
-                                    <div class="progress-bar-bg">
-                                        <div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(15, (acc.current_exp % 1000) / 10))}%"></div>
-                                    </div>
-                                </div>
-
-                                <div class="acc-actions">
-                                    <span>Last match: ${acc.last_match_time || 'Running...'}</span>
-                                    <div class="action-btns">
-                                        <button class="icon-btn" title="Refresh Profile/EXP" onclick="refreshAccountInfo('${acc.uid}')"><i class="fa-solid fa-rotate"></i></button>
-                                        <button class="icon-btn danger" title="Delete Account" onclick="deleteAccount('${acc.uid}')"><i class="fa-solid fa-trash"></i></button>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-
-                const logContainer = document.getElementById('log-stream');
-                logContainer.innerHTML = data.logs.map(log => {
-                    return `<div class="log-item"><span class="log-time">[${log.time}]</span><span class="log-${log.level}">${escapeHtml(log.message)}</span></div>`;
-                }).join('');
-                logContainer.scrollTop = logContainer.scrollHeight;
-
-            } catch (err) {
-                console.error("Failed to fetch stats:", err);
-            }
-        }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
-
-        setInterval(() => {
-            const sec = Math.floor((Date.now() - startTime) / 1000);
-            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
-            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
-            const s = String(sec % 60).padStart(2, '0');
-            document.getElementById('stat-uptime').innerText = `${h}:${m}:${s}`;
-        }, 1000);
-
-        fetchStats();
-        setInterval(fetchStats, 2500);
-    </script>
-</body>
-</html>"""
-
-@app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    return HTMLResponse(content=HTML_UI)
-
-@app.get("/api/stats")
-async def get_stats():
-    acc_list = list(bot_state.accounts.values())
-    total_gained_exp = sum(acc.get("gained_exp", 0) for acc in acc_list)
-    total_matches = sum(acc.get("matches_played", 0) for acc in acc_list)
-    
-    return JSONResponse(content={
-        "total_accounts": len(acc_list),
-        "total_gained_exp": total_gained_exp,
-        "total_matches": total_matches,
-        "accounts": acc_list,
-        "logs": bot_state.logs
-    })
-
-class AccAddModel(BaseModel):
-    uid: Optional[str] = None
-    password: Optional[str] = None
-    token: Optional[str] = None
-
-class AccUidModel(BaseModel):
-    uid: str
-
-@app.post("/api/account/add")
-async def add_acc(data: AccAddModel):
-    acc_data = data.dict()
-    accounts = load_accounts()
-    accounts.append(acc_data)
-    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(accounts, f, indent=4)
-
-    if "on_account_added" in bot_state.refresh_callbacks:
-        await bot_state.refresh_callbacks["on_account_added"](acc_data)
-        
-    return {"status": "ok"}
-
-@app.post("/api/account/delete")
-async def delete_acc(data: AccUidModel):
-    uid = data.uid
-    accounts = load_accounts()
-    accounts = [a for a in accounts if str(a.get("uid")) != uid and str(a.get("token", "")[:10]) != uid]
-    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(accounts, f, indent=4)
-
-    if uid in bot_state.account_workers:
-        bot_state.account_workers[uid].cancel()
-        del bot_state.account_workers[uid]
-        
-    if uid in bot_state.accounts:
-        del bot_state.accounts[uid]
-
-    return {"status": "ok"}
-
-@app.post("/api/account/refresh")
-async def refresh_acc(data: AccUidModel):
-    uid = data.uid
-    if "on_refresh_account" in bot_state.refresh_callbacks:
-        await bot_state.refresh_callbacks["on_refresh_account"](uid)
-    return {"status": "ok"}
+        except asyncio.CancelledError:
+            print_warning(f"Worker for token {token_label} stopped.")
+            break
+        except Exception as e:
+            print_error(f"Token error: {e}. Retrying in 10s...")
+            await asyncio.sleep(10)
 
 
 # ==================== ACCOUNTS LOADER ====================
+
 def load_accounts():
     accounts = []
     if os.path.exists(ACCOUNTS_FILE):
         try:
             with open(ACCOUNTS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list): accounts = data
-        except Exception: pass
+                if isinstance(data, list):
+                    accounts = data
+        except Exception as e:
+            print_error(f"Could not load {ACCOUNTS_FILE}: {e}")
 
     if not accounts and FALLBACK_UID and FALLBACK_PASSWORD:
         accounts.append({"uid": FALLBACK_UID, "password": FALLBACK_PASSWORD})
@@ -2684,12 +2092,28 @@ def load_accounts():
     return accounts
 
 
-# ==================== MAIN LAUNCHER ====================
+# ==================== MAIN ====================
+
 async def main():
     print_colored("=" * 60, Colors.CYAN)
-    print_colored("    TEAM 84FF - FreeFire Level Up Master Engine", Colors.GREEN)
-    print_colored("    Integrated Engine + Real UDP Logic + Dashboard", Colors.WHITE)
+    print_colored("    TEAM 84FF - FreeFire Level Up Bot (Web Dashboard Mode)", Colors.GREEN)
+    print_colored("   Persistent Device ID + TRUE Parallel + Smart DNS", Colors.WHITE)
     print_colored("=" * 60, Colors.CYAN)
+    print_info(f"Start Match Interval: {START_MATCH_INTERVAL}s")
+    print_info(f"Offline Wait: {NEW_MATCH_DELAY}s (after match found)")
+    print_info(f"Non-match Reconnect: {NON_MATCH_RECONNECT_DELAY}s")
+    print_info(f"Cache Invalidation Threshold: {MAX_CONSECUTIVE_PARSE_FAILURES}x")
+    print_info(f"Parallel Matches: UNLIMITED (background)")
+    print_info(f"Cache TTL: {TOKEN_CACHE_TTL}s ({TOKEN_CACHE_TTL//60} min)")
+    print_info(f"Priority Regions: {PRIORITY_REGIONS}")
+    print_info("Device System: 1 ID = 1 Persistent Device ID (devices.json)")
+    print_colored("=" * 60, Colors.CYAN)
+
+    try:
+        await start_web_dashboard(host=WEB_HOST, port=WEB_PORT)
+        print_success(f"Web Dashboard live at http://localhost:{WEB_PORT}")
+    except Exception as e:
+        print_error(f"Could not start web dashboard: {e}")
 
     async def on_account_added_handler(data):
         if "token" in data and data["token"]:
@@ -2709,6 +2133,11 @@ async def main():
     bot_state.refresh_callbacks["on_refresh_account"] = on_refresh_account_handler
 
     accounts = load_accounts()
+
+    if not accounts:
+        print_warning(f"No accounts found in {ACCOUNTS_FILE}! Add accounts from Web Dashboard.")
+        print_warning(f"Open: http://localhost:{WEB_PORT}")
+
     for acc in accounts:
         if "token" in acc and acc["token"]:
             t = asyncio.create_task(account_loop_token(acc["token"]))
@@ -2718,9 +2147,16 @@ async def main():
             t = asyncio.create_task(account_loop_guest(u, acc["password"]))
             bot_state.account_workers[u] = t
 
-    config = uvicorn.Config(app, host=WEB_HOST, port=WEB_PORT, log_level="error")
-    server = uvicorn.Server(config)
-    await server.serve()
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print_warning("\n[STOP] Shutting down all accounts...")
+        for t in list(bot_state.account_workers.values()):
+            t.cancel()
+        await asyncio.gather(*bot_state.account_workers.values(), return_exceptions=True)
+        print_success("All sessions cleanly closed.")
+
 
 if __name__ == "__main__":
     try:
