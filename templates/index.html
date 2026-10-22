@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEAM 84FF | لوحة التحكم واكتساب الخبرة</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-base: #060913;
+            --bg-card: rgba(13, 19, 36, 0.85);
+            --bg-card-hover: rgba(19, 27, 50, 0.95);
+            --border-card: rgba(0, 242, 254, 0.15);
+            --border-hover: rgba(0, 242, 254, 0.5);
+            --accent-cyan: #00f2fe;
+            --accent-blue: #4facfe;
+            --accent-purple: #7f00ff;
+            --accent-green: #00ff88;
+            --accent-red: #ff3366;
+            --accent-amber: #ffaa00;
+            --text-main: #f0f4fc;
+            --text-muted: #8e9bb5;
+            --glass-glow: 0 8px 32px 0 rgba(0, 242, 254, 0.1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
+
+        body {
+            background-color: var(--bg-base);
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(127, 0, 255, 0.18) 0%, transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(0, 242, 254, 0.15) 0%, transparent 45%),
+                linear-gradient(180deg, #060913 0%, #0a0e1c 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* Login Modal Overlay */
+        .admin-auth-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(3, 6, 15, 0.95); backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        }
+
+        .admin-card {
+            background: var(--bg-card); border: 1px solid var(--border-card);
+            border-radius: 24px; padding: 36px; width: 100%; max-width: 420px;
+            box-shadow: var(--glass-glow); text-align: center;
+        }
+
+        /* Header */
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 20px 28px; background: var(--bg-card);
+            border: 1px solid var(--border-card); border-radius: 20px;
+            backdrop-filter: blur(16px); margin-bottom: 24px;
+        }
+
+        .brand { display: flex; align-items: center; gap: 16px; }
+        .logo-box {
+            width: 50px; height: 50px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            border-radius: 14px; display: flex; align-items: center; justify-content: center;
+            font-size: 24px; color: #fff; box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+        }
+
+        .brand-text h1 { font-size: 22px; font-weight: 800; color: #fff; }
+        .brand-text p { font-size: 13px; color: var(--text-muted); }
+
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 700;
+            cursor: pointer; transition: all 0.25s ease; border: none; outline: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            color: #040914; box-shadow: 0 4px 16px rgba(0, 242, 254, 0.25);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0, 242, 254, 0.4); }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-card);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--border-hover); }
+
+        .btn-danger { background: rgba(255, 51, 102, 0.15); color: var(--accent-red); border: 1px solid rgba(255, 51, 102, 0.3); }
+        .btn-danger:hover { background: rgba(255, 51, 102, 0.3); }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px; margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card); border: 1px solid var(--border-card);
+            border-radius: 18px; padding: 20px; display: flex; align-items: center; gap: 16px;
+        }
+
+        .stat-icon {
+            width: 48px; height: 48px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center; font-size: 20px;
+        }
+        .stat-icon.cyan { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
+        .stat-icon.green { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); }
+        .stat-icon.purple { background: rgba(127, 0, 255, 0.15); color: #c084fc; }
+        .stat-icon.amber { background: rgba(255, 170, 0, 0.15); color: var(--accent-amber); }
+
+        .stat-content h3 { font-size: 22px; font-weight: 800; color: #fff; }
+        .stat-content p { font-size: 12px; color: var(--text-muted); }
+
+        /* Dashboard Layout */
+        .dashboard-main { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+        @media (max-width: 1024px) { .dashboard-main { grid-template-columns: 1fr; } }
+
+        .card-box {
+            background: var(--bg-card); border: 1px solid var(--border-card);
+            border-radius: 20px; padding: 24px; backdrop-filter: blur(16px);
+        }
+
+        .box-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .box-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+
+        .account-card {
+            background: rgba(10, 15, 30, 0.7); border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px; padding: 20px; margin-bottom: 16px; position: relative;
+        }
+
+        .acc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+        .acc-info h4 { font-size: 16px; font-weight: 700; color: #fff; }
+        .acc-info span { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+        .acc-status {
+            font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px;
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .status-online { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); }
+        .status-match { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
+        .status-error { background: rgba(255, 51, 102, 0.15); color: var(--accent-red); }
+
+        .exp-box {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+            background: rgba(0, 0, 0, 0.3); padding: 12px; border-radius: 12px; margin-bottom: 14px;
+        }
+        .exp-item { display: flex; flex-direction: column; }
+        .exp-label { font-size: 11px; color: var(--text-muted); }
+        .exp-val { font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #fff; }
+
+        .eta-badge {
+            background: rgba(255, 170, 0, 0.15); color: var(--accent-amber);
+            border: 1px solid rgba(255, 170, 0, 0.3); padding: 4px 10px;
+            border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;
+        }
+
+        /* Logs */
+        .log-stream {
+            height: 480px; background: #03060f; border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px; padding: 14px; font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; dir: ltr;
+        }
+        .log-item { line-height: 1.4; word-break: break-all; text-align: left; }
+        .log-time { color: #64748b; margin-right: 6px; }
+        .log-info { color: #38bdf8; }
+        .log-success { color: #4ade80; }
+        .log-warning { color: #fbbf24; }
+        .log-error { color: #f87171; }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(3, 6, 15, 0.85); backdrop-filter: blur(8px);
+            display: none; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-card {
+            background: #0c1224; border: 1px solid var(--border-card);
+            border-radius: 20px; width: 100%; max-width: 460px; padding: 28px;
+        }
+
+        .form-group { margin-bottom: 16px; text-align: right; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        .form-input {
+            width: 100%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px; padding: 12px; color: #fff; font-size: 14px; outline: none;
+        }
+        .form-input:focus { border-color: var(--accent-cyan); }
+    </style>
+</head>
+<body>
+
+    <!-- Admin Authentication Modal -->
+    <div class="admin-auth-overlay" id="admin-auth-modal">
+        <div class="admin-card">
+            <div class="logo-box" style="margin: 0 auto 16px auto;">
+                <i class="fa-solid fa-lock"></i>
+            </div>
+            <h2 style="color:#fff; margin-bottom:8px;">تسجيل دخول الأدمن</h2>
+            <p style="color:var(--text-muted); font-size:13px; margin-bottom:20px;">أدخل مفتاح الأدمن للوصول إلى لوحة التحكم</p>
+            <form onsubmit="handleAdminLogin(event)">
+                <div class="form-group">
+                    <input type="password" id="admin-pass" class="form-input" placeholder="كلمة المرور / Admin Key" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%; margin-top:10px;">
+                    <i class="fa-solid fa-right-to-bracket"></i> دخول
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="brand">
+                <div class="logo-box">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>TEAM 84FF <span style="font-weight:400; color:var(--text-muted); font-size:14px;">| LEVEL UP MASTER</span></h1>
+                    <p><i class="fa-solid fa-circle" style="color:var(--accent-green); font-size:8px;"></i> النظام يعمل بكفاءة عاليه</p>
+                </div>
+            </div>
+            <div class="header-actions" style="display:flex; gap:10px;">
+                <button class="btn btn-secondary" onclick="fetchStats()"><i class="fa-solid fa-rotate"></i> تحديث</button>
+                <button class="btn btn-primary" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> إضافة حساب جديد</button>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon cyan"><i class="fa-solid fa-users"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-accounts">0</h3>
+                    <p>الحسابات الشغالة</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green"><i class="fa-solid fa-angles-up"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-exp" style="color:var(--accent-green)">+0 EXP</h3>
+                    <p>مجموع الخبرة المكتسبة</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon purple"><i class="fa-solid fa-gamepad"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-matches">0</h3>
+                    <p>المباريات المكتملة</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon amber"><i class="fa-solid fa-clock"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-uptime">00:00:00</h3>
+                    <p>مدة تشغيل البوت</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Body -->
+        <div class="dashboard-main">
+            <!-- Accounts Section -->
+            <div class="card-box">
+                <div class="box-header">
+                    <div class="box-title">
+                        <i class="fa-solid fa-users-gear" style="color:var(--accent-cyan)"></i>
+                        <span>مراقبة الحسابات الحية</span>
+                    </div>
+                </div>
+                <div id="accounts-container">
+                    <p style="text-align:center; color:var(--text-muted); padding:30px;">جاري تحميل بيانات الحسابات...</p>
+                </div>
+            </div>
+
+            <!-- Real-time Terminal Stream -->
+            <div class="card-box">
+                <div class="box-header">
+                    <div class="box-title">
+                        <i class="fa-solid fa-terminal" style="color:var(--accent-green)"></i>
+                        <span>سجل العمليات والترمينال المباشر</span>
+                    </div>
+                </div>
+                <div class="log-stream" id="log-stream"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Account -->
+    <div class="modal-overlay" id="add-modal">
+        <div class="modal-card">
+            <div class="box-header">
+                <h3 style="color:#fff;"><i class="fa-solid fa-user-plus" style="color:var(--accent-cyan)"></i> إضافة حساب جديد</h3>
+                <button class="btn btn-secondary" style="padding:6px 12px;" onclick="closeAddModal()">X</button>
+            </div>
+            <form id="add-acc-form" onsubmit="submitAddAccount(event)">
+                <div class="form-group">
+                    <label>نوع الحساب</label>
+                    <select class="form-input" id="acc-type" onchange="toggleFormType()">
+                        <option value="guest">زائر (UID + كلمة السر)</option>
+                        <option value="token">توكن مباشر (Access Token)</option>
+                    </select>
+                </div>
+                <div id="guest-fields">
+                    <div class="form-group">
+                        <label>UID الحساب</label>
+                        <input type="text" class="form-input" id="acc-uid" placeholder="مثال: 7644913583">
+                    </div>
+                    <div class="form-group">
+                        <label>كلمة سر الزائر (Password)</label>
+                        <input type="text" class="form-input" id="acc-password" placeholder="مثال: PASS_SECRET_123">
+                    </div>
+                </div>
+                <div id="token-fields" style="display:none;">
+                    <div class="form-group">
+                        <label>Access Token</label>
+                        <textarea class="form-input" id="acc-token" rows="3" placeholder="ضع التوكن هنا..."></textarea>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">إلغاء</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-play"></i> حفظ وتشغيل</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let startTime = Date.now();
+        let adminKey = localStorage.getItem('admin_key') || '';
+
+        if (adminKey) {
+            document.getElementById('admin-auth-modal').style.display = 'none';
+        }
+
+        function handleAdminLogin(e) {
+            e.preventDefault();
+            const pass = document.getElementById('admin-pass').value.trim();
+            if (pass) {
+                adminKey = pass;
+                localStorage.setItem('admin_key', pass);
+                document.getElementById('admin-auth-modal').style.display = 'none';
+                fetchStats();
+            }
+        }
+
+        function openAddModal() { document.getElementById('add-modal').classList.add('active'); }
+        function closeAddModal() { document.getElementById('add-modal').classList.remove('active'); }
+
+        function toggleFormType() {
+            const type = document.getElementById('acc-type').value;
+            document.getElementById('guest-fields').style.display = type === 'guest' ? 'block' : 'none';
+            document.getElementById('token-fields').style.display = type === 'token' ? 'block' : 'none';
+        }
+
+        async function submitAddAccount(e) {
+            e.preventDefault();
+            const type = document.getElementById('acc-type').value;
+            let payload = { admin_key: adminKey };
+            if (type === 'guest') {
+                const uid = document.getElementById('acc-uid').value.trim();
+                const password = document.getElementById('acc-password').value.trim();
+                if (!uid || !password) return alert('الرجاء إدخال الـ UID وكلمة السر');
+                payload.uid = uid; payload.password = password;
+            } else {
+                const token = document.getElementById('acc-token').value.trim();
+                if (!token) return alert('الرجاء إدخال التوكن');
+                payload.token = token;
+            }
+
+            try {
+                const res = await fetch('/api/account/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    closeAddModal();
+                    document.getElementById('add-acc-form').reset();
+                    fetchStats();
+                } else {
+                    alert('خطأ: ' + (data.error || 'فشل في الإضافة'));
+                }
+            } catch (err) { alert('فشل الاتصال: ' + err); }
+        }
+
+        async function deleteAccount(uid) {
+            if (!confirm('هل أنت تأكد من إزالة الحساب ' + uid + '؟')) return;
+            try {
+                await fetch('/api/account/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid, admin_key: adminKey })
+                });
+                fetchStats();
+            } catch (err) { console.error(err); }
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats?admin_key=' + encodeURIComponent(adminKey));
+                if (res.status === 401) {
+                    document.getElementById('admin-auth-modal').style.display = 'flex';
+                    return;
+                }
+                const data = await res.json();
+
+                document.getElementById('stat-total-accounts').innerText = data.total_accounts;
+                document.getElementById('stat-total-exp').innerText = '+' + data.total_gained_exp.toLocaleString() + ' EXP';
+                document.getElementById('stat-total-matches').innerText = data.total_matches;
+
+                const container = document.getElementById('accounts-container');
+                if (data.accounts.length === 0) {
+                    container.innerHTML = `<p style="text-align:center; color:var(--text-muted); padding:30px;">لا يوجد حسابات شغالة حالياً. اضغط على "+ إضافة حساب جديد" للبَدء.</p>`;
+                } else {
+                    container.innerHTML = data.accounts.map(acc => {
+                        const gainedExp = acc.gained_exp || 0;
+                        const statusClass = acc.status === 'IN_MATCH' ? 'status-match' : (acc.status === 'ERROR' ? 'status-error' : 'status-online');
+                        const statusText = acc.status === 'IN_MATCH' ? `داخل مباراة (${acc.active_matches} شغالة)` : acc.status;
+                        
+                        return `
+                            <div class="account-card">
+                                <div class="acc-top">
+                                    <div class="acc-info">
+                                        <h4>${acc.nickname} <span style="font-size:11px; background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">${acc.region || 'BD'}</span></h4>
+                                        <span>UID: ${acc.uid}</span>
+                                    </div>
+                                    <div class="acc-status ${statusClass}">${statusText}</div>
+                                </div>
+
+                                <div class="exp-box">
+                                    <div class="exp-item">
+                                        <span class="exp-label">الخبرة الأولى</span>
+                                        <span class="exp-val">${acc.initial_exp.toLocaleString()}</span>
+                                    </div>
+                                    <div class="exp-item">
+                                        <span class="exp-label">الخبرة الحالية</span>
+                                        <span class="exp-val">${acc.current_exp.toLocaleString()}</span>
+                                    </div>
+                                    <div class="exp-item">
+                                        <span class="exp-label">الزيادة (EXP)</span>
+                                        <span class="exp-val" style="color:var(--accent-green)">+${gainedExp.toLocaleString()}</span>
+                                    </div>
+                                </div>
+
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
+                                    <div class="eta-badge"><i class="fa-solid fa-stopwatch"></i> ${acc.eta_info || 'جاري التقدير...'}</div>
+                                    <div>
+                                        <button class="btn btn-secondary" style="padding:6px 10px;" onclick="deleteAccount('${acc.uid}')"><i class="fa-solid fa-trash" style="color:var(--accent-red)"></i> حكف</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                const logContainer = document.getElementById('log-stream');
+                logContainer.innerHTML = data.logs.map(log => {
+                    return `<div class="log-item"><span class="log-time">[${log.time}]</span><span class="log-${log.level}">${log.message}</span></div>`;
+                }).join('');
+                logContainer.scrollTop = logContainer.scrollHeight;
+
+            } catch (err) { console.error("Error fetching stats:", err); }
+        }
+
+        setInterval(() => {
+            const sec = Math.floor((Date.now() - startTime) / 1000);
+            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const s = String(sec % 60).padStart(2, '0');
+            document.getElementById('stat-uptime').innerText = `${h}:${m}:${s}`;
+        }, 1000);
+
+        fetchStats();
+        setInterval(fetchStats, 2500);
+    </script>
+</body>
+</html>
