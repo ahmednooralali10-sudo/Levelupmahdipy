@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+google-play-scraper
+pycryptodome
+protobuf-decoder
+protobuf
+requests
+pydantic
+aiohttp
