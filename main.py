@@ -1,5 +1,5 @@
 # ==============================================================================
-#      FREE FIRE FULL BOT ENGINE & INTEGRATED WEB DASHBOARD (OB55 READY)
+#      FREE FIRE FULL BOT ENGINE & ADVANCED DASHBOARD (OB55 READY)
 # ==============================================================================
 import sys
 import asyncio
@@ -74,14 +74,14 @@ class BotDashboardState:
         self.refresh_callbacks: Dict[str, Any] = {}
         self.logs: List[Dict[str, Any]] = []
 
-    def log(self, message: str, type_: str = "info"):
+    def log(self, message: str, level: str = "info"):
         entry = {
             "time": datetime.now().strftime("%H:%M:%S"),
             "message": message,
-            "type": type_
+            "level": level
         }
         self.logs.append(entry)
-        if len(self.logs) > 150:
+        if len(self.logs) > 200:
             self.logs.pop(0)
 
     def register_account(self, uid: str, nickname: str, region: str, level: int, exp: int, likes: int):
@@ -92,13 +92,14 @@ class BotDashboardState:
                 "nickname": nickname,
                 "region": region,
                 "level": level,
-                "start_exp": exp,
+                "initial_exp": exp,
                 "current_exp": exp,
-                "exp_gained": 0,
+                "gained_exp": 0,
                 "likes": likes,
-                "matches": 0,
+                "matches_played": 0,
                 "status": "OFFLINE",
                 "active_matches": 0,
+                "last_match_time": None,
                 "added_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
         else:
@@ -117,15 +118,16 @@ class BotDashboardState:
     def increment_match(self, uid: str):
         uid_str = str(uid)
         if uid_str in self.accounts:
-            self.accounts[uid_str]["matches"] += 1
+            self.accounts[uid_str]["matches_played"] += 1
+            self.accounts[uid_str]["last_match_time"] = datetime.now().strftime("%H:%M:%S")
 
     def update_exp(self, uid: str, current_exp: int, level: int):
         uid_str = str(uid)
         if uid_str in self.accounts:
             acc = self.accounts[uid_str]
-            if acc["start_exp"] == 0:
-                acc["start_exp"] = current_exp
-            acc["exp_gained"] = max(0, current_exp - acc["start_exp"])
+            if acc["initial_exp"] == 0:
+                acc["initial_exp"] = current_exp
+            acc["gained_exp"] = max(0, current_exp - acc["initial_exp"])
             acc["current_exp"] = current_exp
             acc["level"] = level
 
@@ -1698,204 +1700,925 @@ async def account_loop_token(token: str):
 
 
 # ==================== WEB APP (FASTAPI INTERFACE) ====================
-app = FastAPI(title="FreeFire Level-Up Master Dashboard")
+app = FastAPI(title="TEAM 84FF Level-Up Master Dashboard")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-HTML_UI = """
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
+HTML_UI = """<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة التحكم بالبوت - TEAM 84FF</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>TEAM 84FF | FreeFire Level Up Bot Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background: #0b0f19; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; }
-        .glass { background: rgba(17, 24, 39, 0.75); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        :root {
+            --bg-base: #060913;
+            --bg-card: rgba(13, 19, 36, 0.75);
+            --bg-card-hover: rgba(19, 27, 50, 0.9);
+            --border-card: rgba(0, 242, 254, 0.12);
+            --border-hover: rgba(0, 242, 254, 0.4);
+            --accent-cyan: #00f2fe;
+            --accent-blue: #4facfe;
+            --accent-purple: #7f00ff;
+            --accent-green: #00ff88;
+            --accent-red: #ff3366;
+            --accent-amber: #ffaa00;
+            --text-main: #f0f4fc;
+            --text-muted: #8e9bb5;
+            --glass-glow: 0 8px 32px 0 rgba(0, 242, 254, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(127, 0, 255, 0.14) 0%, transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(0, 242, 254, 0.12) 0%, transparent 45%),
+                linear-gradient(180deg, #060913 0%, #0a0e1c 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 28px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 20px;
+            backdrop-filter: blur(16px);
+            box-shadow: var(--glass-glow);
+            margin-bottom: 24px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-box {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            color: #fff;
+            box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+            animation: pulse-glow 3s infinite alternate;
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 15px rgba(0, 242, 254, 0.3); }
+            100% { box-shadow: 0 0 25px rgba(127, 0, 255, 0.5); }
+        }
+
+        .brand-text h1 {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #ffffff, var(--accent-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .brand-text p {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+        }
+
+        .live-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(0, 255, 136, 0.12);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            color: var(--accent-green);
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: blink 1.2s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            border: none;
+            outline: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            color: #040914;
+            box-shadow: 0 4px 16px rgba(0, 242, 254, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 242, 254, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-card);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--border-hover);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 18px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 18px;
+            padding: 20px;
+            backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-3px);
+            box-shadow: var(--glass-glow);
+        }
+
+        .stat-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+
+        .stat-icon.cyan { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
+        .stat-icon.green { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); }
+        .stat-icon.purple { background: rgba(127, 0, 255, 0.15); color: #c084fc; }
+        .stat-icon.amber { background: rgba(255, 170, 0, 0.15); color: var(--accent-amber); }
+
+        .stat-content h3 {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+
+        .stat-content p {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .dashboard-main {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-main { grid-template-columns: 1fr; }
+        }
+
+        .card-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 20px;
+            padding: 24px;
+            backdrop-filter: blur(16px);
+        }
+
+        .box-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .box-title {
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .accounts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .account-card {
+            background: rgba(10, 15, 30, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 16px;
+            padding: 20px;
+            transition: all 0.25s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .account-card:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--border-hover);
+        }
+
+        .acc-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .acc-profile {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .acc-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #1e293b, #334155);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 242, 254, 0.2);
+        }
+
+        .acc-info h4 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .region-badge {
+            background: rgba(255, 255, 255, 0.08);
+            color: #a5b4fc;
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .acc-info span {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .acc-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+
+        .status-online {
+            background: rgba(0, 255, 136, 0.12);
+            color: var(--accent-green);
+            border: 1px solid rgba(0, 255, 136, 0.25);
+        }
+
+        .status-match {
+            background: rgba(0, 242, 254, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 242, 254, 0.4);
+            animation: pulse-border 1.5s infinite alternate;
+        }
+
+        @keyframes pulse-border {
+            0% { border-color: rgba(0, 242, 254, 0.3); }
+            100% { border-color: rgba(0, 242, 254, 0.8); }
+        }
+
+        .exp-box {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.28);
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 14px;
+        }
+
+        .exp-item {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .exp-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .exp-val {
+            font-size: 15px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: #fff;
+        }
+
+        .exp-gained {
+            color: var(--accent-green) !important;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .gained-badge {
+            background: rgba(0, 255, 136, 0.16);
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .level-progress {
+            margin-bottom: 14px;
+        }
+
+        .level-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .progress-bar-bg {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .acc-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .action-btns {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-card);
+            color: var(--text-muted);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .icon-btn:hover {
+            background: rgba(0, 242, 254, 0.15);
+            color: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+        }
+
+        .icon-btn.danger:hover {
+            background: rgba(255, 51, 102, 0.15);
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+
+        .logs-box {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .log-stream {
+            flex: 1;
+            min-height: 480px;
+            max-height: 600px;
+            background: #03060f;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .log-stream::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .log-stream::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        .log-item {
+            line-height: 1.4;
+            word-break: break-all;
+        }
+
+        .log-time { color: #64748b; margin-right: 6px; }
+        .log-info { color: #38bdf8; }
+        .log-success { color: #4ade80; }
+        .log-warning { color: #fbbf24; }
+        .log-error { color: #f87171; }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(3, 6, 15, 0.82);
+            backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal-card {
+            background: #0c1224;
+            border: 1px solid var(--border-card);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 480px;
+            padding: 28px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state i {
+            font-size: 42px;
+            margin-bottom: 12px;
+            color: rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
-<body class="min-h-screen pb-12">
-    <nav class="glass sticky top-0 z-50 px-6 py-4 mb-8 flex justify-between items-center border-b border-slate-800">
-        <div class="flex items-center space-x-3 space-x-reverse">
-            <i class="fa-solid fa-fire text-2xl text-amber-500"></i>
-            <h1 class="text-xl font-extrabold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">لوحة إدارة البوتات Pro</h1>
-        </div>
-        <div class="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-4 py-1.5 rounded-full font-bold">
-            <i class="fa-solid fa-signal me-1"></i> النظام متصل ونشط
-        </div>
-    </nav>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="logo-box">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>TEAM 84FF <span style="font-weight:400; color:var(--text-muted); font-size:16px;">| LEVEL UP BOT</span></h1>
+                    <p>
+                        <span class="live-tag"><span class="pulse-dot"></span> System Live</span>
+                        <span>• Safe Multi-Match Engine</span>
+                    </p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" onclick="fetchStats()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                <button class="btn btn-primary" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> Add Account</button>
+            </div>
+        </header>
 
-    <div class="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div class="glass p-6 rounded-2xl md:col-span-1 h-fit shadow-xl">
-            <h2 class="text-md font-bold mb-4 text-amber-400 flex items-center">
-                <i class="fa-solid fa-plus-circle me-2"></i> إضافة حساب جديد
-            </h2>
-            <form id="addForm" class="space-y-4">
-                <div>
-                    <label class="block text-xs text-slate-400 mb-1">نوع الاعتماد</label>
-                    <select id="authType" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none">
-                        <option value="guest">UID + كلمة المرور</option>
-                        <option value="token">Access Token مباشر</option>
-                    </select>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon cyan"><i class="fa-solid fa-users"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-accounts">0</h3>
+                    <p>Active Accounts</p>
                 </div>
-                <div id="guestFields">
-                    <input type="text" id="uidInput" placeholder="UID الحساب" class="w-full mb-3 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm outline-none">
-                    <input type="password" id="passInput" placeholder="كلمة السر" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm outline-none">
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green"><i class="fa-solid fa-angles-up"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-exp" style="color:var(--accent-green)">+0 EXP</h3>
+                    <p>Total EXP Gained</p>
                 </div>
-                <div id="tokenFields" class="hidden">
-                    <textarea id="tokenInput" placeholder="ضع Access Token..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm outline-none h-20"></textarea>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon purple"><i class="fa-solid fa-gamepad"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-total-matches">0</h3>
+                    <p>Matches Completed</p>
                 </div>
-                <button type="submit" class="w-full bg-amber-600 hover:bg-amber-500 font-bold py-2.5 rounded-lg text-sm shadow-lg shadow-amber-600/30 transition-all">
-                    إضافة الحساب للبوت
-                </button>
-            </form>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon amber"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="stat-content">
+                    <h3 id="stat-uptime">00:00:00</h3>
+                    <p>Bot Uptime</p>
+                </div>
+            </div>
         </div>
 
-        <div class="md:col-span-3 space-y-6">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div class="glass p-4 rounded-xl text-center">
-                    <p class="text-xs text-slate-400 mb-1">الحسابات المضافة</p>
-                    <p id="totalAccs" class="text-2xl font-bold text-white">0</p>
+        <div class="dashboard-main">
+            <div class="card-box">
+                <div class="box-header">
+                    <div class="box-title">
+                        <i class="fa-solid fa-user-astronaut" style="color:var(--accent-cyan)"></i>
+                        <span>Live Accounts & EXP Monitor</span>
+                    </div>
                 </div>
-                <div class="glass p-4 rounded-xl text-center">
-                    <p class="text-xs text-slate-400 mb-1">الماتشات النشطة</p>
-                    <p id="activeMatches" class="text-2xl font-bold text-emerald-400">0</p>
-                </div>
-                <div class="glass p-4 rounded-xl text-center">
-                    <p class="text-xs text-slate-400 mb-1">إجمالي الـ (XO)</p>
-                    <p id="totalMatches" class="text-2xl font-bold text-amber-400">0</p>
-                </div>
-                <div class="glass p-4 rounded-xl text-center">
-                    <p class="text-xs text-slate-400 mb-1">الخبرة المكتسبة (EXP)</p>
-                    <p id="totalExp" class="text-2xl font-bold text-orange-400">0</p>
+                <div class="accounts-list" id="accounts-container">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                        <p>Loading active accounts...</p>
+                    </div>
                 </div>
             </div>
 
-            <div class="glass rounded-2xl p-6 overflow-x-auto shadow-xl">
-                <h2 class="text-md font-bold mb-4 text-slate-200">جدول متابعة الحسابات</h2>
-                <table class="w-full text-right text-sm">
-                    <thead>
-                        <tr class="border-b border-slate-800 text-slate-400 text-xs">
-                            <th class="pb-3">اللاعب / UID</th>
-                            <th class="pb-3">المنطقة</th>
-                            <th class="pb-3">المستوى (Lvl)</th>
-                            <th class="pb-3">الماتشات (XO)</th>
-                            <th class="pb-3">الخبرة (+EXP)</th>
-                            <th class="pb-3">الحالة الحالية</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody" class="divide-y divide-slate-800/50">
-                        <tr><td colspan="6" class="py-8 text-center text-slate-500">جاري تحميل البيانات...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="glass rounded-2xl p-6 shadow-xl">
-                <h2 class="text-sm font-bold mb-3 text-slate-300">سجل الأحداث الفوري (Live Logs)</h2>
-                <div id="logsBox" class="bg-slate-950 p-4 rounded-xl h-44 overflow-y-auto font-mono text-xs text-slate-400 space-y-1"></div>
+            <div class="card-box logs-box">
+                <div class="box-header">
+                    <div class="box-title">
+                        <i class="fa-solid fa-terminal" style="color:var(--accent-green)"></i>
+                        <span>Live Match & Bot Logs</span>
+                    </div>
+                    <span style="font-size:12px; color:var(--text-muted);">Real-time</span>
+                </div>
+                <div class="log-stream" id="log-stream">
+                </div>
             </div>
         </div>
     </div>
 
+    <div class="modal-overlay" id="add-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-user-plus" style="color:var(--accent-cyan); margin-right:8px;"></i> Add New Account</h3>
+                <button class="icon-btn" onclick="closeAddModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="add-acc-form" onsubmit="submitAddAccount(event)">
+                <div class="form-group">
+                    <label>Account Type</label>
+                    <select class="form-input" id="acc-type" onchange="toggleFormType()">
+                        <option value="guest">Guest Account (UID + Password)</option>
+                        <option value="token">Access Token</option>
+                    </select>
+                </div>
+                <div id="guest-fields">
+                    <div class="form-group">
+                        <label>Guest UID</label>
+                        <input type="text" class="form-input" id="acc-uid" placeholder="e.g. 7644913583">
+                    </div>
+                    <div class="form-group">
+                        <label>Guest Password / Secret</label>
+                        <input type="text" class="form-input" id="acc-password" placeholder="e.g. ZERO_GRAVITY_4NM38">
+                    </div>
+                </div>
+                <div id="token-fields" style="display:none;">
+                    <div class="form-group">
+                        <label>Access Token</label>
+                        <textarea class="form-input" id="acc-token" rows="3" placeholder="Paste access token here..."></textarea>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Save & Start</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
-        const authType = document.getElementById('authType');
-        authType.addEventListener('change', (e) => {
-            if (e.target.value === 'guest') {
-                document.getElementById('guestFields').classList.remove('hidden');
-                document.getElementById('tokenFields').classList.add('hidden');
-            } else {
-                document.getElementById('guestFields').classList.add('hidden');
-                document.getElementById('tokenFields').classList.remove('hidden');
-            }
-        });
+        let startTime = Date.now();
 
-        document.getElementById('addForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const type = authType.value;
-            let payload = {};
-            if (type === 'guest') {
-                payload = { uid: document.getElementById('uidInput').value, password: document.getElementById('passInput').value };
-            } else {
-                payload = { token: document.getElementById('tokenInput').value };
-            }
-
-            const res = await fetch('/api/accounts/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (res.ok) {
-                alert('تم التوجيه والإضافة بنجاح!');
-                location.reload();
-            }
-        });
-
-        async function refresh() {
-            try {
-                const res = await fetch('/api/state');
-                const data = await res.json();
-                
-                document.getElementById('totalAccs').innerText = Object.keys(data.accounts).length;
-                let activeM = 0, totalM = 0, exp = 0;
-                let html = '';
-
-                for (let id in data.accounts) {
-                    let acc = data.accounts[id];
-                    activeM += acc.active_matches || 0;
-                    totalM += acc.matches || 0;
-                    exp += acc.exp_gained || 0;
-
-                    html += `
-                        <tr class="hover:bg-slate-800/30 transition-all">
-                            <td class="py-3">
-                                <div class="text-white font-bold">${acc.nickname}</div>
-                                <div class="text-xs text-slate-500 font-mono">${acc.uid}</div>
-                            </td>
-                            <td><span class="bg-slate-800 border border-slate-700 px-2 py-0.5 rounded text-xs">${acc.region}</span></td>
-                            <td class="text-amber-400 font-bold">Lvl ${acc.level}</td>
-                            <td class="text-emerald-400 font-bold">${acc.matches} XO</td>
-                            <td class="text-orange-400 font-bold">+${acc.exp_gained}</td>
-                            <td>
-                                <span class="px-2.5 py-1 rounded-full text-xs font-bold ${
-                                    acc.status === 'ONLINE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                                    acc.status === 'IN_MATCH' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                                    acc.status === 'SEARCHING' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-400'
-                                }">${acc.status}</span>
-                            </td>
-                        </tr>
-                    `;
-                }
-                if (html) document.getElementById('tableBody').innerHTML = html;
-
-                document.getElementById('activeMatches').innerText = activeM;
-                document.getElementById('totalMatches').innerText = totalM;
-                document.getElementById('totalExp').innerText = exp;
-
-                let logsHtml = '';
-                data.logs.slice().reverse().forEach(log => {
-                    logsHtml += `<div><span class="text-slate-600">[${log.time}]</span> ${log.message}</div>`;
-                });
-                document.getElementById('logsBox').innerHTML = logsHtml;
-
-            } catch (e) {}
+        function openAddModal() {
+            document.getElementById('add-modal').classList.add('active');
         }
 
-        setInterval(refresh, 2000);
-        refresh();
+        function closeAddModal() {
+            document.getElementById('add-modal').classList.remove('active');
+        }
+
+        function toggleFormType() {
+            const type = document.getElementById('acc-type').value;
+            document.getElementById('guest-fields').style.display = type === 'guest' ? 'block' : 'none';
+            document.getElementById('token-fields').style.display = type === 'token' ? 'block' : 'none';
+        }
+
+        async function submitAddAccount(e) {
+            e.preventDefault();
+            const type = document.getElementById('acc-type').value;
+            let payload = {};
+            if (type === 'guest') {
+                const uid = document.getElementById('acc-uid').value.trim();
+                const password = document.getElementById('acc-password').value.trim();
+                if (!uid || !password) return alert('Please enter both UID and Password');
+                payload = { uid, password };
+            } else {
+                const token = document.getElementById('acc-token').value.trim();
+                if (!token) return alert('Please enter token');
+                payload = { token };
+            }
+
+            try {
+                const res = await fetch('/api/account/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    closeAddModal();
+                    document.getElementById('add-acc-form').reset();
+                    fetchStats();
+                } else {
+                    alert('Error adding account: ' + (data.error || 'Unknown'));
+                }
+            } catch (err) {
+                alert('Request failed: ' + err);
+            }
+        }
+
+        async function deleteAccount(uid) {
+            if (!confirm('Are you sure you want to remove account ' + uid + '?')) return;
+            try {
+                await fetch('/api/account/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid })
+                });
+                fetchStats();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function refreshAccountInfo(uid) {
+            try {
+                await fetch('/api/account/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid })
+                });
+                fetchStats();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+
+                document.getElementById('stat-total-accounts').innerText = data.total_accounts;
+                document.getElementById('stat-total-exp').innerText = '+' + data.total_gained_exp.toLocaleString() + ' EXP';
+                document.getElementById('stat-total-matches').innerText = data.total_matches;
+
+                const container = document.getElementById('accounts-container');
+                if (data.accounts.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fa-solid fa-ghost"></i>
+                            <p>No active accounts running. Click "+ Add Account" to start!</p>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = data.accounts.map(acc => {
+                        const gainedExp = acc.gained_exp || 0;
+                        const statusClass = acc.status === 'IN_MATCH' ? 'status-match' : 'status-online';
+                        const statusText = acc.status === 'IN_MATCH' ? `In Match (${acc.active_matches} active)` : acc.status;
+                        
+                        return `
+                            <div class="account-card">
+                                <div class="acc-top">
+                                    <div class="acc-profile">
+                                        <div class="acc-avatar"><i class="fa-solid fa-user"></i></div>
+                                        <div class="acc-info">
+                                            <h4>${escapeHtml(acc.nickname)} <span class="region-badge">${acc.region || 'BD'}</span></h4>
+                                            <span>UID: ${acc.uid}</span>
+                                        </div>
+                                    </div>
+                                    <div class="acc-status ${statusClass}">
+                                        <span class="pulse-dot"></span>
+                                        <span>${statusText}</span>
+                                    </div>
+                                </div>
+
+                                <div class="exp-box">
+                                    <div class="exp-item">
+                                        <span class="exp-label">Initial EXP</span>
+                                        <span class="exp-val">${acc.initial_exp.toLocaleString()}</span>
+                                    </div>
+                                    <div class="exp-item">
+                                        <span class="exp-label">Current EXP</span>
+                                        <span class="exp-val">${acc.current_exp.toLocaleString()}</span>
+                                    </div>
+                                    <div class="exp-item">
+                                        <span class="exp-label">EXP Gained</span>
+                                        <span class="exp-val exp-gained">
+                                            <span class="gained-badge">+${gainedExp.toLocaleString()} EXP</span>
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="level-progress">
+                                    <div class="level-labels">
+                                        <span style="color:var(--accent-cyan)">Level ${acc.level}</span>
+                                        <span style="color:var(--text-muted)">Matches: ${acc.matches_played}</span>
+                                    </div>
+                                    <div class="progress-bar-bg">
+                                        <div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(15, (acc.current_exp % 1000) / 10))}%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="acc-actions">
+                                    <span>Last match: ${acc.last_match_time || 'Running...'}</span>
+                                    <div class="action-btns">
+                                        <button class="icon-btn" title="Refresh Profile/EXP" onclick="refreshAccountInfo('${acc.uid}')"><i class="fa-solid fa-rotate"></i></button>
+                                        <button class="icon-btn danger" title="Delete Account" onclick="deleteAccount('${acc.uid}')"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                const logContainer = document.getElementById('log-stream');
+                logContainer.innerHTML = data.logs.map(log => {
+                    return `<div class="log-item"><span class="log-time">[${log.time}]</span><span class="log-${log.level}">${escapeHtml(log.message)}</span></div>`;
+                }).join('');
+                logContainer.scrollTop = logContainer.scrollHeight;
+
+            } catch (err) {
+                console.error("Failed to fetch stats:", err);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        setInterval(() => {
+            const sec = Math.floor((Date.now() - startTime) / 1000);
+            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const s = String(sec % 60).padStart(2, '0');
+            document.getElementById('stat-uptime').innerText = `${h}:${m}:${s}`;
+        }, 1000);
+
+        fetchStats();
+        setInterval(fetchStats, 2500);
     </script>
 </body>
-</html>
-"""
+</html>"""
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     return HTMLResponse(content=HTML_UI)
 
-@app.get("/api/state")
-async def get_state():
+@app.get("/api/stats")
+async def get_stats():
+    acc_list = list(bot_state.accounts.values())
+    total_gained_exp = sum(acc.get("gained_exp", 0) for acc in acc_list)
+    total_matches = sum(acc.get("matches_played", 0) for acc in acc_list)
+    
     return JSONResponse(content={
-        "accounts": bot_state.accounts,
+        "total_accounts": len(acc_list),
+        "total_gained_exp": total_gained_exp,
+        "total_matches": total_matches,
+        "accounts": acc_list,
         "logs": bot_state.logs
     })
 
@@ -1904,7 +2627,10 @@ class AccAddModel(BaseModel):
     password: Optional[str] = None
     token: Optional[str] = None
 
-@app.post("/api/accounts/add")
+class AccUidModel(BaseModel):
+    uid: str
+
+@app.post("/api/account/add")
 async def add_acc(data: AccAddModel):
     acc_data = data.dict()
     accounts = load_accounts()
@@ -1915,7 +2641,31 @@ async def add_acc(data: AccAddModel):
     if "on_account_added" in bot_state.refresh_callbacks:
         await bot_state.refresh_callbacks["on_account_added"](acc_data)
         
-    return {"status": "success"}
+    return {"status": "ok"}
+
+@app.post("/api/account/delete")
+async def delete_acc(data: AccUidModel):
+    uid = data.uid
+    accounts = load_accounts()
+    accounts = [a for a in accounts if str(a.get("uid")) != uid and str(a.get("token", "")[:10]) != uid]
+    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(accounts, f, indent=4)
+
+    if uid in bot_state.account_workers:
+        bot_state.account_workers[uid].cancel()
+        del bot_state.account_workers[uid]
+        
+    if uid in bot_state.accounts:
+        del bot_state.accounts[uid]
+
+    return {"status": "ok"}
+
+@app.post("/api/account/refresh")
+async def refresh_acc(data: AccUidModel):
+    uid = data.uid
+    if "on_refresh_account" in bot_state.refresh_callbacks:
+        await bot_state.refresh_callbacks["on_refresh_account"](uid)
+    return {"status": "ok"}
 
 
 # ==================== ACCOUNTS LOADER ====================
